@@ -14,11 +14,17 @@ artifacts='[]'
 for archive in "$dir"/*.tar.gz "$dir"/*.zip; do
   [ -e "$archive" ] || continue
   file="$(basename "$archive")"
-  # rama-<version>-<target>.<ext>: the target is what a running build
-  # matches itself against, so it is read back from the name it was built as.
+  # rama-<version>-<arch>-<os>.<ext>, as package.sh names it.
   target="${file#*-${version}-}"
   target="${target%.tar.gz}"
   target="${target%.zip}"
+  # Files are named <arch>-<os> (package.sh), but a running build matches
+  # its full triple, so that is what the manifest declares.
+  case "$target" in
+    *-linux) target="${target%-linux}-unknown-linux-gnu" ;;
+    *-macos) target="${target%-macos}-apple-darwin" ;;
+    *-windows) target="${target%-windows}-pc-windows-msvc" ;;
+  esac
   artifacts="$(jq \
     --arg target "$target" \
     --arg url "${base_url}/${file}" \

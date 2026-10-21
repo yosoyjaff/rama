@@ -15,7 +15,15 @@ set -euo pipefail
 binary="${BINARY:-rama}"
 version="${VERSION:?set VERSION}"
 target="${TARGET:?set TARGET}"
-name="${binary}-${version}-${target}"
+# Files are named <arch>-<os> (x86_64-linux, aarch64-macos, x86_64-windows),
+# not by the full triple; manifest.sh maps the name back to the triple.
+case "$target" in
+  *-linux-*) os=linux ;;
+  *-apple-darwin) os=macos ;;
+  *-windows-*) os=windows ;;
+  *) echo "error: no file name for target $target" >&2; exit 1 ;;
+esac
+name="${binary}-${version}-${target%%-*}-${os}"
 built="target/${target}/release"
 
 # A binary carries its dependencies' licences: MIT and Apache ask for their

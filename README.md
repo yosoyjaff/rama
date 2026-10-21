@@ -66,15 +66,15 @@ large histories, and looks at home on every desktop.
 
 Download the file for your platform from the
 [latest release](https://github.com/yosoyjaff/rama/releases/latest). Files are
-named `rama-<version>-<target>`; `x86_64` is Intel/AMD and `aarch64` is Arm
+named `rama-<version>-<arch>-<os>`; `x86_64` is Intel/AMD and `aarch64` is Arm
 (Apple Silicon, Windows on Arm, Arm Linux).
 
 | Platform | File | How to install |
 | --- | --- | --- |
 | **macOS** | `.dmg` | Open it and drag `Rama.app` to **Applications**. |
 | **Windows** | `.msi` | Run the installer. Or take the `.zip` and run `rama.exe`. |
-| **Debian, Ubuntu** | `.deb` | `sudo apt install ./rama-<version>-<target>.deb` |
-| **Fedora, openSUSE** | `.rpm` | `sudo dnf install ./rama-<version>-<target>.rpm` |
+| **Debian, Ubuntu** | `.deb` | `sudo apt install ./rama-<version>-<arch>-linux.deb` |
+| **Fedora, openSUSE** | `.rpm` | `sudo dnf install ./rama-<version>-<arch>-linux.rpm` |
 | **Any Linux** | `.AppImage` | `chmod +x` it and run it. Or take the `.tar.gz` and run `./install.sh` (installs to `~/.local`). |
 
 Rama checks for new versions a few seconds after it starts and offers to
