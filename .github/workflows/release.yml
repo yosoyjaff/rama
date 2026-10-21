@@ -200,8 +200,9 @@ jobs:
             "https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-${arch}.AppImage"
           chmod +x appimagetool
           sudo mv appimagetool /usr/local/bin/
-          # dpkg-shlibdeps (cargo-deb's $auto dependencies) is in dpkg-dev.
-          sudo apt-get install -y --no-install-recommends dpkg-dev
+          # dpkg-shlibdeps (cargo-deb's $auto dependencies) is in dpkg-dev;
+          # appimagetool refuses to run without desktop-file-validate.
+          sudo apt-get install -y --no-install-recommends dpkg-dev desktop-file-utils
 
       - name: Install WiX
         if: runner.os == 'Windows'
