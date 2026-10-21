@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows installer, built by packaging/package.sh with WiX v5:
+
+    wix build packaging/windows/rama.wxs -arch x64 -d Version=0.2.0 \
+      -d BinDir=target/x86_64-pc-windows-msvc/release -o rama.msi
+
+  UpgradeCode is Rama's identity to Windows Installer: it never changes, so a
+  newer .msi replaces the installed one instead of installing beside it.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Rama" Manufacturer="Rama" Version="$(var.Version)"
+           UpgradeCode="30C44A55-BE4D-45C0-8DA3-3A97EAE126D0" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Rama is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="RamaIcon" SourceFile="assets\app-icon\app.rama.ico" />
+    <Property Id="ARPPRODUCTICON" Value="RamaIcon" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Rama" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main">
+      <Component Directory="INSTALLFOLDER">
+        <File Id="RamaExe" Source="$(var.BinDir)\rama.exe" KeyPath="yes">
+          <Shortcut Id="RamaStartMenu" Directory="ProgramMenuFolder" Name="Rama"
+                    WorkingDirectory="INSTALLFOLDER" Icon="RamaIcon" Advertise="yes" />
+        </File>
+      </Component>
+      <Component Directory="INSTALLFOLDER">
+        <File Id="License" Source="LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+      </Component>
+      <Component Directory="INSTALLFOLDER">
+        <File Id="ThirdPartyLicenses" Source="THIRD_PARTY_LICENSES.txt" KeyPath="yes" />
+      </Component>
+    </Feature>
+  </Package>
+</Wix>

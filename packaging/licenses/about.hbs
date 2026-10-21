@@ -1,0 +1,25 @@
+Third-party software in Rama
+============================
+
+Rama is MIT-licensed (see LICENSE). The binary also contains the crates below,
+under the licences that follow.
+
+Icons: Solar Icons by 480 Design (CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/) and Hugeicons (MIT).
+
+{{#each overview}}
+- {{{name}}} ({{count}}): {{id}}
+{{/each}}
+
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{{name}}} ({{id}})
+
+Used by:
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

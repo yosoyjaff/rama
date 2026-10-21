@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Rama
+GenericName=Git Client
+Comment=A native Git desktop client
+Exec=rama %F
+TryExec=rama
+Icon=app.rama
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;version control;
+StartupWMClass=app.rama

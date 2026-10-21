@@ -1,0 +1,123 @@
+[package]
+name = "rama"
+description = "Rama, a native Git desktop client built on GPUI Kit."
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/yosoyjaff/rama"
+publish = false
+
+[[bin]]
+name = "rama"
+path = "src/main.rs"
+
+[dependencies]
+# One UI dependency for the whole application: gpui-kit re-exports GPUI itself
+# (`use gpui_kit::*`), the styled components (`gpui_kit::component`), the
+# behavior layer (`gpui_kit::base`) and the bundled icons (`gpui_kit::assets`).
+# Never add `gpui` directly: two GPUI revisions in one graph are two different
+# crates, and every type crossing that seam stops matching.
+gpui-kit = "0.6.6"
+
+anyhow = "1"
+# Author photographs: one small GET per avatar, into a disk cache. Blocking
+# and minimal on purpose — this is the only network the application makes, it
+# runs on the background executor, and a GUI has no use for an async runtime
+# underneath a handful of image downloads.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+# Hashing, for two jobs that both want one: Gravatar addresses an identicon by
+# the SHA-256 of an email, and a cached avatar is named after the SHA-256 of
+# its URL.
+sha2 = "0.10"
+
+# Dates: git writes ISO-8601 timestamps and the history shows them as local
+# calendar time, which is a timezone database's job, not a format string's.
+# Column widths for the diff's code plane: a tab, a CJK glyph and an emoji are
+# not one column wide, and a monospace ruler drawn as if they were is wrong by
+# exactly the amount that matters.
+unicode-width = "0.2"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+semver = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The todo file an interactive rebase is driven with: git reads it through
+# GIT_SEQUENCE_EDITOR instead of opening an editor there is nowhere to draw.
+# It doubles as the temporary repository the git layer's tests run against.
+tempfile = "3"
+
+# Watching a repository's git dir, so a commit, merge or checkout made in
+# another tool shows up in the graph without a manual refresh.
+notify = "8"
+
+[build-dependencies]
+# Compiles the Windows icon resource into the executable (build.rs). Only
+# invoked when the target is Windows.
+embed-resource = "3.0.11"
+
+[dev-dependencies]
+# The test harness: a headless app and window, for the views that can only be
+# checked by running them. Behind a feature, because it replaces the platform
+# layer and must never reach a release build.
+gpui-kit = { version = "0.6.6", features = ["test-support"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+
+# A GPUI application is unusable in an unoptimized build: text shaping, layout
+# and the renderer all run every frame. Optimize dependencies even in
+# `cargo run`, and keep the application's own code fast to rebuild.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true
+
+# Native Linux packages, built by packaging/package.sh with `--no-build` from
+# the release binary (cargo-deb / cargo-generate-rpm). Both install the same
+# files as install.sh does per user: the desktop entry and the icons are named
+# after the window's app_id (`app.rama`), or the taskbar shows a generic icon.
+# With `--target`, both tools read `target/release/` as `target/<triple>/release/`.
+[package.metadata.deb]
+section = "devel"
+priority = "optional"
+# Shared libraries come from the binary (dpkg-shlibdeps); git is what Rama
+# drives, so without it the app opens to nothing.
+depends = "$auto, git"
+license-file = ["LICENSE", "0"]
+extended-description = "A native Git client with a clear commit graph, built in Rust on GPUI."
+assets = [
+    ["target/release/rama", "usr/bin/", "755"],
+    ["packaging/linux/app.rama.desktop", "usr/share/applications/", "644"],
+    ["assets/app-icon/32x32.png", "usr/share/icons/hicolor/32x32/apps/app.rama.png", "644"],
+    ["assets/app-icon/64x64.png", "usr/share/icons/hicolor/64x64/apps/app.rama.png", "644"],
+    ["assets/app-icon/128x128.png", "usr/share/icons/hicolor/128x128/apps/app.rama.png", "644"],
+    ["assets/app-icon/256x256.png", "usr/share/icons/hicolor/256x256/apps/app.rama.png", "644"],
+    ["assets/app-icon/512x512.png", "usr/share/icons/hicolor/512x512/apps/app.rama.png", "644"],
+    ["THIRD_PARTY_LICENSES.txt", "usr/share/doc/rama/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/rama", dest = "/usr/bin/rama", mode = "755" },
+    { source = "packaging/linux/app.rama.desktop", dest = "/usr/share/applications/app.rama.desktop", mode = "644" },
+    { source = "assets/app-icon/32x32.png", dest = "/usr/share/icons/hicolor/32x32/apps/app.rama.png", mode = "644" },
+    { source = "assets/app-icon/64x64.png", dest = "/usr/share/icons/hicolor/64x64/apps/app.rama.png", mode = "644" },
+    { source = "assets/app-icon/128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/app.rama.png", mode = "644" },
+    { source = "assets/app-icon/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/app.rama.png", mode = "644" },
+    { source = "assets/app-icon/512x512.png", dest = "/usr/share/icons/hicolor/512x512/apps/app.rama.png", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/rama/LICENSE", mode = "644", doc = true },
+    { source = "THIRD_PARTY_LICENSES.txt", dest = "/usr/share/licenses/rama/THIRD_PARTY_LICENSES.txt", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+git = "*"

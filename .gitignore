@@ -1,0 +1,7 @@
+/target
+/dist
+**/*.rs.bk
+.DS_Store
+
+# Generated per release by cargo about (packaging/licenses/).
+/THIRD_PARTY_LICENSES.txt
