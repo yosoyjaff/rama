@@ -221,6 +221,49 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: bash packaging/package.sh
 
+      # The installer is signed too, or Windows warns when it is opened even
+      # though the exe inside is signed. Same switch as the executable; the
+      # .msi is not in the manifest, so only its own checksum is redone.
+      - name: Upload the unsigned installer
+        id: unsigned-msi
+        if: runner.os == 'Windows' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-msi-${{ matrix.target }}
+          path: dist/*.msi
+          if-no-files-found: error
+
+      - name: Sign the installer
+        if: steps.unsigned-msi.outcome == 'success'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_MSI_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-msi.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-msi
+
+      - name: Verify the installer's signature
+        if: steps.unsigned-msi.outcome == 'success'
+        shell: pwsh
+        run: |
+          foreach ($msi in Get-ChildItem signed-msi/*.msi) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $msi.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "Signature on $($msi.Name) is $($signature.Status): $($signature.StatusMessage)"
+            }
+            if ($null -eq $signature.TimeStamperCertificate) {
+              throw "Signature on $($msi.Name) has no timestamp"
+            }
+            Write-Host "Signed by $($signature.SignerCertificate.Subject)"
+            Copy-Item -Force $msi.FullName "dist/$($msi.Name)"
+            $hash = (Get-FileHash -Algorithm SHA256 "dist/$($msi.Name)").Hash.ToLower()
+            [IO.File]::WriteAllText("$PWD/dist/$($msi.Name).sha256", "$hash`n")
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.target }}

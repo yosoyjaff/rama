@@ -15,7 +15,7 @@ layout and the renderer run every frame. Rama's own code stays at
 | --- | --- | --- | --- |
 | Linux | x86_64, aarch64 | `.tar.gz`, `.deb`, `.rpm`, `.AppImage` | Flatpak for a sandbox |
 | macOS | Apple Silicon, Intel | `.tar.gz` with `Rama.app`, `.dmg` | Developer ID signing + notarization |
-| Windows | x64, Arm64 | `.zip`, `.msi` | Signing the `.msi` too |
+| Windows | x64, Arm64 | `.zip`, `.msi` | Code signing (SignPath, pending) |
 
 Everything is built by `packaging/package.sh` from the release binary. The
 archive is what the updater installs; the rest are installers:
@@ -59,11 +59,14 @@ the job. In GitHub (Settings → Secrets and variables → Actions):
 | Kind | Name |
 | --- | --- |
 | Secret | `SIGNPATH_API_TOKEN` (a user with the *submitter* role) |
-| Variable | `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` |
+| Variable | `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG`, `SIGNPATH_MSI_ARTIFACT_CONFIGURATION_SLUG` |
 
 In SignPath: the GitHub.com *trusted build system* linked to the project, and
-an *artifact configuration* `<zip-file>` holding a `<pe-file path="rama.exe">`
-(GitHub artifacts arrive zipped). The Foundation requires a public repository,
+two *artifact configurations* (GitHub artifacts arrive zipped): the default, a
+`<zip-file>` holding a `<pe-file path="rama.exe">`, and the installer's, a
+`<zip-file>` holding a `<msi-file path="*.msi">`, whose slug goes in
+`SIGNPATH_MSI_ARTIFACT_CONFIGURATION_SLUG`. The `.msi` is signed after WiX
+builds it, so the exe inside it is the signed one too. The Foundation requires a public repository,
 an OSI licence and the README's *Code signing policy* section. Once accepted,
 restore the README's "Free code signing provided by SignPath.io" line.
 
