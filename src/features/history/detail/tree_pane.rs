@@ -201,6 +201,7 @@ impl DetailPanel {
         };
         let discard = div()
             .id("panel-discard-all")
+            .group("panel-discard-all")
             .flex_none()
             .size(px(22.0))
             .flex()
@@ -209,9 +210,16 @@ impl DetailPanel {
             .rounded(px(5.0))
             .text_color(shade)
             .child(
+                // An svg takes no colour from its parent, so it carries the
+                // button's, hover included.
                 icons::icon(icons::TRASH_BIN_MINIMALISTIC)
                     .size(px(14.0))
-                    .flex_none(),
+                    .flex_none()
+                    .text_color(shade)
+                    .when(armed, |glyph| {
+                        glyph
+                            .group_hover("panel-discard-all", move |style| style.text_color(danger))
+                    }),
             )
             .tooltip(tip("Discard all changes"))
             .when(armed, |button| {

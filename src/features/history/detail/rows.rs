@@ -290,8 +290,10 @@ impl DetailPanel {
         ];
         let segments = modes.into_iter().map(|(as_tree, label, icon, hint)| {
             let on = self.listing.as_tree == as_tree;
+            let group = SharedString::from(format!("panel-listing-{label}"));
             div()
-                .id(SharedString::from(format!("panel-listing-{label}")))
+                .id(group.clone())
+                .group(group.clone())
                 .flex()
                 .items_center()
                 .gap(px(4.0))
@@ -307,7 +309,17 @@ impl DetailPanel {
                 .text_color(if on { lit } else { dim })
                 .when(on, |half| half.bg(theme::ink(0.07)))
                 .when(!on, |half| half.hover(move |style| style.text_color(lit)))
-                .child(icons::icon(icon).size(px(11.0)).flex_none())
+                // An svg takes no colour from its parent: without its own it
+                // is not drawn, so it follows the label's, hover included.
+                .child(
+                    icons::icon(icon)
+                        .size(px(11.0))
+                        .flex_none()
+                        .text_color(if on { lit } else { dim })
+                        .when(!on, |glyph| {
+                            glyph.group_hover(group, move |style| style.text_color(lit))
+                        }),
+                )
                 .child(label)
                 .tooltip(tip(hint))
                 .on_click(cx.listener(move |panel, _, _, cx| {

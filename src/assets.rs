@@ -38,6 +38,10 @@ const OVERRIDES: &[(&str, &[u8])] = &[
     ),
 ];
 
+/// The app icon, as drawn on the About page.
+pub const APP_ICON: &str = "app-icon/128x128.png";
+const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/app-icon/128x128.png");
+
 /// This application's assets, with GPUI Kit's bundled icons behind them.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Assets;
@@ -46,6 +50,9 @@ impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if let Some((_, bytes)) = OVERRIDES.iter().find(|(name, _)| *name == path) {
             return Ok(Some(Cow::Borrowed(bytes)));
+        }
+        if path == APP_ICON {
+            return Ok(Some(Cow::Borrowed(APP_ICON_BYTES)));
         }
         if let Some(bytes) = crate::ui::icons::load(path)? {
             return Ok(Some(bytes));

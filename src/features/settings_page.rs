@@ -9,7 +9,7 @@ use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPick
 use gpui_kit::component::{Sizable as _, link::Link};
 use gpui_kit::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable, Hsla, IntoElement, Render,
-    SharedString, Subscription, Window, div, prelude::*, px,
+    SharedString, Subscription, Window, div, img, prelude::*, px,
 };
 
 use crate::recents;
@@ -26,6 +26,8 @@ const RAIL_WIDTH: f32 = 176.0;
 /// Width the page's content is held to, so a line of prose stays readable on
 /// a wide window.
 const PAGE_WIDTH: f32 = 560.0;
+/// Side of the app icon above the About page's title.
+const LOGO_SIZE: f32 = 64.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -717,7 +719,6 @@ impl SettingsPage {
 
     fn render_about(&mut self, theme: &Theme) -> AnyElement {
         let platform = format!("{} · {}", platform_name(), std::env::consts::ARCH);
-        let settings_file = settings::settings_path().display().to_string();
         let repository = env!("CARGO_PKG_REPOSITORY");
         let identity = div()
             .pb(px(12.0))
@@ -730,7 +731,12 @@ impl SettingsPage {
                     .child(env!("CARGO_PKG_DESCRIPTION")),
             )
             .into_any_element();
-        self.page(
+        let logo = img(crate::assets::APP_ICON)
+            .size(px(LOGO_SIZE))
+            .mb(px(12.0))
+            .into_any_element();
+        self.page_under(
+            Some(logo),
             crate::APP_NAME,
             vec![
                 identity,
@@ -745,7 +751,6 @@ impl SettingsPage {
             .chain([
                 self.fact("Platform", platform.into(), theme),
                 self.fact("License", env!("CARGO_PKG_LICENSE").into(), theme),
-                self.fact("Settings file", settings_file.into(), theme),
                 self.fact_element(
                     "Source code",
                     Link::new("settings-about-repository")
@@ -797,6 +802,17 @@ impl SettingsPage {
     }
 
     fn page(&self, title: &'static str, rows: Vec<AnyElement>, theme: &Theme) -> AnyElement {
+        self.page_under(None, title, rows, theme)
+    }
+
+    /// A page with something drawn above its title, such as About's logo.
+    fn page_under(
+        &self,
+        above_title: Option<AnyElement>,
+        title: &'static str,
+        rows: Vec<AnyElement>,
+        theme: &Theme,
+    ) -> AnyElement {
         div()
             .id("settings-page")
             .flex_1()
@@ -811,6 +827,7 @@ impl SettingsPage {
                     .py(px(20.0))
                     .flex()
                     .flex_col()
+                    .children(above_title)
                     .child(
                         div()
                             .pb(px(8.0))
