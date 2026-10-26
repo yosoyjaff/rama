@@ -94,6 +94,8 @@ Documentation license: original prose and illustrations for which GPUI Kit holds
 - [Dialog](/component/dialog.md): A dialog dialog for displaying content in a layer above the app.
 - [Dialog](/zh-CN/base/primitives/dialog.md): 带焦点管理、遮罩、标题和关闭部件的可组合模态界面。
 - [Dialog](/zh-CN/component/dialog.md): 在应用内容上方显示浮层内容的对话框组件。
+- [Diff](/component/diff.md): Readonly unified and Git diff display for code review, merge conflicts and source previews.
+- [Diff](/zh-CN/component/diff.md): 用于代码审阅、合并冲突和源文件预览的只读 unified diff 与 Git diff 展示组件。
 - [Dock](/base/dock.md): A dockable workspace — splits, tab groups, and edge docks — whose layout is pure data and whose appearance is entirely yours.
 - [Dock](/component/dock.md): Production-ready dock layouts with styled tabs, split panes, edge docks, and persistent state.
 - [Dock](/zh-CN/base/dock.md): 用持久布局树、面板生命周期和可替换渲染器构建停靠工作区。
@@ -134,18 +136,18 @@ Documentation license: original prose and illustrations for which GPUI Kit holds
 - [Geometry](/zh-CN/docs/geometry.md): 在 GPUI 中使用带单位的坐标、布局长度与颜色。
 - [Getting Started](/base/getting-started.md): Install, initialize, and render your first gpui-base control.
 - [Getting Started](/docs/getting-started.md): Build your first GPUI Kit desktop application with one dependency and one view.
-- [Getting Started](/shell/getting-started.md): Add the runtime to a Rust application, write the script it loads, and check that script without opening a window.
+- [Getting Started](/shell/getting-started.md): Install gpui-shell, write and run a standalone app in JavaScript, check it without opening a window, and move it under a Rust host when it needs more.
 - [Getting Started](/zh-CN/base/getting-started.md): 安装、初始化并渲染第一个 gpui-base 控件。
 - [Getting Started](/zh-CN/docs/getting-started.md): 通过一个依赖和一个视图构建首个 GPUI Kit 桌面应用。
-- [Getting Started](/zh-CN/shell/getting-started.md): 把运行时接进一个 Rust 应用、写它要加载的脚本，并在不开窗口的情况下检查这个脚本。
+- [Getting Started](/zh-CN/shell/getting-started.md): 安装 gpui-shell，用 JavaScript 编写并运行 gpui-shell Standalone App，在不开窗口的情况下检查它，并在需要更多能力时把它迁移到 Rust Host 下。
 - [Global](/docs/global.md): Share application-wide state with GPUI Global, and connect changes to Views and windows.
 - [Global](/zh-CN/docs/global.md): 使用 GPUI Global 共享应用级状态，并将变化传递给 View 和窗口。
 - [GPUI Base](/base.md): The unstyled behavior and infrastructure foundation of GPUI Kit, the Rust desktop framework.
 - [GPUI Base](/zh-CN/base.md): GPUI Kit Rust 桌面框架中无样式的行为与基础设施层。
 - [GPUI Kit](/docs.md): A comprehensive Rust framework for building fantastic, high-performance desktop applications with GPUI.
 - [GPUI Kit](/zh-CN/docs.md): 基于 GPUI 构建出色高性能桌面应用的综合性 Rust 开发框架。
-- [GPUI Shell](/shell.md): Makes a Rust GPUI application extensible in JavaScript, rendered by GPUI itself — no WebView, no DOM. Plugins first, standalone script applications second.
-- [GPUI Shell](/zh-CN/shell.md): 让 Rust 的 GPUI 应用可以用 JavaScript 扩展，界面仍由 GPUI 自己渲染——没有 WebView，也没有 DOM。首要目标是插件，其次才是纯脚本应用。
+- [GPUI Shell](/shell.md): Makes a Rust GPUI application extensible in JavaScript, rendered by GPUI itself — no WebView, no DOM. Start as a gpui-shell standalone app in JavaScript, and bring in Rust when it needs more.
+- [GPUI Shell](/zh-CN/shell.md): 让 Rust 的 GPUI 应用可以用 JavaScript 扩展，界面仍由 GPUI 自己渲染——没有 WebView，也没有 DOM。应用可以先写成纯 JavaScript 的 gpui-shell Standalone App，需要更多能力时再引入 Rust。
 - [GroupBox](/component/group-box.md): A styled container element with an optional title to group related content together.
 - [GroupBox](/zh-CN/component/group-box.md): 带可选标题的分组容器组件，用于组织相关内容。
 - [History](/base/history.md): Browser-style navigation trails and grouped undo/redo transactions for application state.
@@ -215,7 +217,9 @@ Documentation license: original prose and illustrations for which GPUI Kit holds
 - [Overlays](/shell/overlays.md): Dialogs, the sheet and toasts, their stacking and dismissal order, and why they may only be opened from an event.
 - [Overlays](/zh-CN/shell/overlays.md): dialog、sheet 与 toast，它们的层叠与关闭顺序，以及为什么只能从事件中打开。
 - [Packaging](/docs/packaging.md): Turn a GPUI Kit release build into a macOS app and DMG, a Windows installer, or a Linux tarball and DEB.
+- [Packaging](/shell/packaging.md): Ship a script application as a desktop application — `gpui-shell bundle` makes a small macOS .app or Linux archive that uses an installed gpui-shell or downloads it, or a portable Windows folder, and a standalone package can carry the binary itself.
 - [Packaging](/zh-CN/docs/packaging.md): 将 GPUI Kit 应用制作成 macOS、Windows 和 Linux 上可安装、可验证的发布产物。
+- [Packaging](/zh-CN/shell/packaging.md): 把脚本应用发布成桌面应用——`gpui-shell bundle` 生成体积很小的 macOS .app 或 Linux 压缩包，使用已安装的 gpui-shell 或自动下载，也可以生成 Windows 便携文件夹；还可以手工组装自带二进制的独立包。
 - [Pagination](/base/primitives/pagination.md): A controlled page navigator with explicit current and total page state.
 - [Pagination](/component/pagination.md): Pagination with page navigation, next and previous links.
 - [Pagination](/zh-CN/base/primitives/pagination.md): 显式管理当前页和总页数的受控分页导航。
@@ -286,6 +290,8 @@ Documentation license: original prose and illustrations for which GPUI Kit holds
 - [Slider](/component/slider.md): A control that allows the user to select values from a range using a draggable thumb.
 - [Slider](/zh-CN/base/primitives/slider.md): 轨道、已选区和滑块可独立设置样式的状态驱动范围输入。
 - [Slider](/zh-CN/component/slider.md): 通过拖动滑块在区间内选择数值的控件。
+- [Speech](/component/speech.md): Dictate text from the microphone through the system speech recognizer or any recognizer the application provides.
+- [Speech](/zh-CN/component/speech.md): 通过系统语音识别器或应用自己的识别器，把麦克风中的语音转成文本。
 - [Spinner](/component/spinner.md): Displays an animated loading showing the completion progress of a task.
 - [Spinner](/zh-CN/component/spinner.md): 显示旋转加载动画，用于反馈任务或异步操作的进行中状态。
 - [State and Views](/shell/state.md): Views, init and render, cx.notify(), retained input state, and asynchronous work.

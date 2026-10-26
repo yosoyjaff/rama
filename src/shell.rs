@@ -12,7 +12,7 @@
 use crate::features::workspace::Workspace;
 use crate::keymap;
 use crate::ui::AppTitleBar;
-use gpui_kit::component::{ActiveTheme, Root, v_flex};
+use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::*;
 
 pub struct Shell {
@@ -206,13 +206,5 @@ impl Render for Shell {
                     .w_full()
                     .child(self.workspace.clone()),
             )
-            // Application content renders each overlay layer once; `Root` alone
-            // does not render dialog, sheet or notification content. They cost
-            // nothing until something opens one.
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
-            // Last, so the resize strips sit above everything at the edges.
-            .children(crate::ui::window_frame::resize_edges(window))
     }
 }

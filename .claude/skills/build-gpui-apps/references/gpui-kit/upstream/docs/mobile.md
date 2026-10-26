@@ -54,7 +54,7 @@ gpui = { package = "gpui-pre", version = "=0.3.4", default-features = false }
 gpui-kit = { git = "https://github.com/longbridge/gpui-kit", rev = "7d9efcd2069f9eaa6eb3ba6345aac4aa7d87c9f7", default-features = false, features = ["component"] }
 ```
 
-These revisions reproduce the example's dependency baseline. The Kit revision includes mobile platform gating but predates mobile tooltip suppression. The current GPUI Kit checkout uses `gpui-pre 0.3.7`, while this pinned mobile platform and renderer use `0.3.4`. Cargo can select both versions, producing incompatible GPUI types; replacing the Kit dependency with a local path is **not** a working upgrade by itself. First update the mobile platform and renderer to the same GPUI version as Kit and validate that combination. Only then can you use a path dependency such as:
+These revisions reproduce the example's dependency baseline. The Kit revision includes mobile platform gating but predates mobile tooltip suppression. The current GPUI Kit checkout uses `gpui-pre 0.3.10`, while this pinned mobile platform and renderer use `0.3.4`. Cargo can select both versions, producing incompatible GPUI types; replacing the Kit dependency with a local path is **not** a working upgrade by itself. First update the mobile platform and renderer to the same GPUI version as Kit and validate that combination. Only then can you use a path dependency such as:
 
 ```toml
 gpui-kit = { path = "../gpui-kit/crates/kit", default-features = false, features = ["component"] }
@@ -159,7 +159,7 @@ Android uses a separate activity and surface lifecycle. The repository contains 
 | --- | --- |
 | Xcode cannot find the simulator destination, or the app launches on another simulator | The pinned `build.sh` builds for iOS 18.6 on an iPhone 16 Pro. Install that runtime or edit its Xcode destination to match `xcodebuild -showdestinations`. Then run `xcrun simctl list devices available`: the script's `_ios_run_simulator` installs on the first available iPhone, independently of the build destination. If that is a different device, change its `sim_id` selection to the intended UUID. |
 | Device build fails signing or install | Replace the example development team in `example/ios/project.yml`, regenerate the Xcode project, and confirm the device appears in Xcode. The default script target is a physical device; pass `--simulator` explicitly for the documented simulator path. |
-| Rust reports two versions of GPUI or mismatched `App`/`Window` types | Check the resolved `gpui-pre` packages. The pinned mobile fork uses `0.3.4`; this checkout uses `0.3.7`. Align the entire mobile platform and Kit dependency set before using the local Kit path. |
+| Rust reports two versions of GPUI or mismatched `App`/`Window` types | Check the resolved `gpui-pre` packages. The pinned mobile fork uses `0.3.4`; this checkout uses `0.3.10`. Align the entire mobile platform and Kit dependency set before using the local Kit path. |
 | App launches with a blank or stale GPUI view | Check that the Rust callback opens a window, the child controller is attached, `layoutSubviews` publishes nonzero bounds, and visible frames are requested. Inspect the Xcode console; the example sends Rust logs and panics to `NSLog`. |
 | Text, icons, or images are missing | Verify the font family and glyph coverage, registered `AssetSource` and exact icon keys, or the image's packaged path and HTTP client. A desktop asset or font configuration does not automatically carry into the mobile host. |
 

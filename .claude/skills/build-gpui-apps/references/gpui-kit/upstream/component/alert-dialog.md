@@ -25,6 +25,14 @@ use gpui_kit::component::WindowExt;
 
 ## Usage
 
+### Entrance animation
+
+Use `.entrance(DialogEntrance::Fade)`, `.entrance(DialogEntrance::FadeSlide)`, or
+`.entrance(DialogEntrance::None)` to override the default `SlideDown` entrance.
+AlertDialog follows the same theme timing, window boundaries, and reduced-motion
+policy as [Dialog](dialog.md#entrance-animation), including the exit
+animation.
+
 ### Setup Application Root View
 
 Like Dialog, you need to set up your application's root view to render the dialog layer. See [Dialog documentation](dialog.md#setup-application-root-view) for details.
@@ -396,6 +404,8 @@ window.open_alert_dialog(cx, |alert, _, _| {
 | `overlay_closable(bool)` | Allow clicking overlay to close, default `false`              |
 | `close_button(bool)`     | Show/hide close button, default `false`                       |
 | `keyboard(bool)`         | Support ESC key to close, default `true`                      |
+| `entrance(DialogEntrance)` | Set entrance animation, default `SlideDown` |
+| `centered()` | Center vertically in the window instead of near its top |
 | `on_ok(callback)`        | Set OK button callback, return `true` to close dialog         |
 | `on_cancel(callback)`    | Set cancel button callback, return `true` to close dialog     |
 | `on_close(callback)`     | Set callback after dialog closes                              |

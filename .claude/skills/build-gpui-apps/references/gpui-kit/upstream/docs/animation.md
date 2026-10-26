@@ -112,7 +112,7 @@ The excerpt shows the lifecycle decision; the [full example](https://github.com/
 
 ## GPUI's element animation
 
-`Animation::new(duration)` creates a one-shot, linear animation. `AnimationExt::with_animation(id, animation, animator)` wraps an `IntoElement`; the callback receives that element and an eased progress value. GPUI calls it during layout, applies the returned element's style, and requests another frame until the animation ends. The callback may change any property supported by that element, such as opacity or a transform. See the [GPUI 0.3.7 animation source](https://docs.rs/gpui-pre/0.3.7/src/gpui/elements/animation.rs.html) for the wrapper's playback rules. Here `gpui-pre` is the publication and version-alignment package name for GPUI; it is not an additional application layer.
+`Animation::new(duration)` creates a one-shot, linear animation. `AnimationExt::with_animation(id, animation, animator)` wraps an `IntoElement`; the callback receives that element and an eased progress value. GPUI calls it during layout, applies the returned element's style, and requests another frame until the animation ends. The callback may change any property supported by that element, such as opacity or a transform. See the [GPUI 0.3.10 animation source](https://docs.rs/gpui-pre/0.3.10/src/gpui/elements/animation.rs.html) for the wrapper's playback rules. Here `gpui-pre` is the publication and version-alignment package name for GPUI; it is not an additional application layer.
 
 ```rust
 use std::time::Duration;

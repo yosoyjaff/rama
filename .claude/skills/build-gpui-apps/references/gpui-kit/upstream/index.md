@@ -1,6 +1,6 @@
 # GPUI Kit documentation index
 
-Retrieved 2026-10-01T10:02:28+00:00. All **183 English pages** from the [official index](https://gpui-kit.com/llms.txt) are bundled below. Chinese translations remain discoverable in `llms.txt`; images stay remote.
+Retrieved 2026-10-26T15:52:50+00:00. All **186 English pages** from the [official index](https://gpui-kit.com/llms.txt) are bundled below. Chinese translations remain discoverable in `llms.txt`; images stay remote.
 
 Read only the pages relevant to the task. These are documentation snapshots, not proof that an API exists in a project's locked version. See `manifest.json` for page sources and SHA-256 hashes.
 
@@ -144,6 +144,8 @@ Credit: [GPUI Kit](https://gpui-kit.com). Prose and original illustrations: [CC 
 
 | [Dialog](component/dialog.md) | A dialog dialog for displaying content in a layer above the app. |
 
+| [Diff](component/diff.md) | Readonly unified and Git diff display for code review, merge conflicts and source previews. |
+
 | [Dock](component/dock.md) | Production-ready dock layouts with styled tabs, split panes, edge docks, and persistent state. |
 
 | [DropdownButton](component/dropdown_button.md) | A DropdownButton is a combination of a button and a trigger button. It allows us to display a dropdown menu when the trigger is clicked, but the left Button can still respond to independent events. |
@@ -221,6 +223,8 @@ Credit: [GPUI Kit](https://gpui-kit.com). Prose and original illustrations: [CC 
 | [Skeleton](component/skeleton.md) | Use to show a placeholder while content is loading. |
 
 | [Slider](component/slider.md) | A control that allows the user to select values from a range using a draggable thumb. |
+
+| [Speech](component/speech.md) | Dictate text from the microphone through the system speech recognizer or any recognizer the application provides. |
 
 | [Spinner](component/spinner.md) | Displays an animated loading showing the completion progress of a task. |
 
@@ -378,15 +382,17 @@ Credit: [GPUI Kit](https://gpui-kit.com). Prose and original illustrations: [CC 
 
 | [Examples](shell/examples.md) | Complete standalone and embedded applications, including retained state, HostModule registrations, and native motion. |
 
-| [Getting Started](shell/getting-started.md) | Add the runtime to a Rust application, write the script it loads, and check that script without opening a window. |
+| [Getting Started](shell/getting-started.md) | Install gpui-shell, write and run a standalone app in JavaScript, check it without opening a window, and move it under a Rust host when it needs more. |
 
-| [GPUI Shell](shell.md) | Makes a Rust GPUI application extensible in JavaScript, rendered by GPUI itself — no WebView, no DOM. Plugins first, standalone script applications second. |
+| [GPUI Shell](shell.md) | Makes a Rust GPUI application extensible in JavaScript, rendered by GPUI itself — no WebView, no DOM. Start as a gpui-shell standalone app in JavaScript, and bring in Rust when it needs more. |
 
 | [Hosting](shell/hosting.md) | The Rust side in full — runtime lifetime, mounting script Views, refreshing them from host state, metrics, exit requests and hot-reload. |
 
 | [HostModule](shell/host-module.md) | How a host lends its own Rust to a script — registration, the import that reaches it, the plain-data boundary, and the rules a Host function runs under. |
 
 | [Overlays](shell/overlays.md) | Dialogs, the sheet and toasts, their stacking and dismissal order, and why they may only be opened from an event. |
+
+| [Packaging](shell/packaging.md) | Ship a script application as a desktop application — `gpui-shell bundle` makes a small macOS .app or Linux archive that uses an installed gpui-shell or downloads it, or a portable Windows folder, and a standalone package can carry the binary itself. |
 
 | [Performance](shell/performance.md) | What a script costs once frame rate stops being the variable — invalidation against description size, the View as the boundary that bounds both, and the two failures FPS cannot tell apart. |
 

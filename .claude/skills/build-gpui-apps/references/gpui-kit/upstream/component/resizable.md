@@ -11,8 +11,8 @@ The resizable component system provides a flexible way to create layouts with re
 
 ```rust
 use gpui_kit::component::resizable::{
-    h_resizable, v_resizable, resizable_panel,
-    ResizablePanelGroup, ResizablePanel, ResizableState, ResizablePanelEvent
+    h_resizable, v_resizable, resizable_panel, resize_handle,
+    ResizablePanelGroup, ResizablePanel, ResizableState, ResizablePanelEvent, HandleEdge
 };
 ```
 
@@ -77,6 +77,35 @@ gpui_kit::base::h_resizable("my-layout")
 
 The indicator's duration and easing come from the theme's motion tokens, and a system reduced-motion preference takes it straight to its target.
 
+### Standalone Resize Handle
+
+An edge that no panel group owns — an application's own sidebar, say — can use `resize_handle` on its own. The handle owns the band, the cursor and the indicator; what a drag resizes is yours. Give it a payload with `on_drag`, follow that payload with `on_drag_move`, and put any other listener on the handle the same way:
+
+```rust
+use gpui_kit::component::resizable::{HandleEdge, resize_handle};
+
+div()
+    .relative()
+    .w(self.sidebar_width)
+    .h_full()
+    .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeSidebar>, _, cx| {
+        this.sidebar_width = e.event.position.x - e.bounds.left();
+        cx.notify();
+    }))
+    .child(sidebar_content)
+    .child(
+        resize_handle("sidebar-edge", Axis::Horizontal)
+            .inside(HandleEdge::Trailing)
+            .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| drag.clone()))
+            .on_double_click(cx.listener(|this, _, _, cx| {
+                this.sidebar_width = DEFAULT_SIDEBAR_WIDTH;
+                cx.notify();
+            })),
+    )
+```
+
+`inside` keeps the whole band within its container, hugging the named edge; without it the band straddles the boundary, half on either side. The band occludes, so while the pointer is on it nothing behind it — its own container included — reads as hovered. A container that needs to know the pointer is still over it listens on the handle too.
+
 ### Panel Size Constraints
 
 ```rust
@@ -84,6 +113,21 @@ resizable_panel()
     .size(px(200.))                    // Initial size
     .size_range(px(150.)..px(400.))    // Min and max size
     .child("Constrained Panel")
+```
+
+### Fixed Panels
+
+A fixed panel keeps its size when its group's container resizes; the other
+panels share the difference in proportion to their sizes. Dragging its own
+handle still resizes it. Use it for a sidebar or an inspector that should keep
+the width the user gave it. A fixed panel needs a `size`.
+
+```rust
+resizable_panel()
+    .size(px(240.))
+    .size_range(px(160.)..px(480.))
+    .fixed()
+    .child("Sidebar")
 ```
 
 ### Multiple Panels

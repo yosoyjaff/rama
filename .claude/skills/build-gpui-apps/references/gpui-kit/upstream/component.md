@@ -50,6 +50,7 @@ description: Browse 75+ production-ready Rust UI components and primitives for f
 - [DatePicker](https://gpui-kit.com/date-picker) - Date selection with calendar
 - [TimeField](https://gpui-kit.com/time-field) - Segmented time-of-day input
 - [OtpInput](https://gpui-kit.com/otp-input) - One-time password input
+- [Speech](https://gpui-kit.com/speech) - Dictation through the system recognizer or your own
 - [ColorPicker](https://gpui-kit.com/color-picker) - Color selection interface
 - [Form](https://gpui-kit.com/form) - Form container and layout
 
@@ -71,6 +72,7 @@ description: Browse 75+ production-ready Rust UI components and primitives for f
 
 ### Advanced Components
 
+- [Diff](https://gpui-kit.com/diff.md) - Readonly patch display for code review and change previews
 - [Calendar](https://gpui-kit.com/calendar) - Calendar display and navigation
 - [Carousel](https://gpui-kit.com/carousel) - Browse through a set of related items
 - [Command](https://gpui-kit.com/command) - Command palette for search and quick actions

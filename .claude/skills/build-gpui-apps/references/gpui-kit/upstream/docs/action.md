@@ -7,7 +7,7 @@ description: Define typed commands and route them through focus, key contexts, a
 
 An **Action** represents an operation the application can perform. A shortcut, menu item, command palette, button, or another Action handler can all dispatch the same typed value. GPUI routes it to the part of the [Element](element.md) tree that owns the command. An [Event](event.md) serves the other direction: it reports something that happened after state changed.
 
-The [GPUI Action source](https://docs.rs/crate/gpui-pre/0.3.7/source/src/action.rs) defines the macro, trait, and registry described here.
+The [GPUI Action source](https://docs.rs/crate/gpui-pre/0.3.10/source/src/action.rs) defines the macro, trait, and registry described here.
 
 This page explains command definition and dispatch. Start with [Focus](focus.md) if you have not yet created a keyboard target; see [KeyBinding](keybinding.md) for key notation, context matching, and keymap setup.
 

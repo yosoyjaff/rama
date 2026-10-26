@@ -5,7 +5,7 @@ description: Shape, measure, lay out, and paint text through GPUI's text system 
 
 # TextSystem
 
-This page follows the `gpui-pre` 0.3.7 API pinned by this repository. `gpui-pre` is the published snapshot and version-alignment mechanism for GPUI, not a separate text engine. Start with a text element; use `TextSystem` directly when your element needs the glyph geometry that GPUI normally manages.
+This page follows the `gpui-pre` 0.3.10 API pinned by this repository. `gpui-pre` is the published snapshot and version-alignment mechanism for GPUI, not a separate text engine. Start with a text element; use `TextSystem` directly when your element needs the glyph geometry that GPUI normally manages.
 
 GPUI's `TextSystem` resolves [fonts](fonts.md) and supplies font metrics. Each [Window](window.md) has a `WindowTextSystem` that adds a line-layout cache to the shared text system. Ordinary text elements and GPUI Kit controls use these services for you. Reach for `window.text_system()` when writing custom text geometry, a chart label, an editor, or another element that must use shaped glyph positions directly.
 
@@ -152,6 +152,8 @@ div()
 `text!(...)` creates a `Text` element with an ID based on this macro call's source location. That ID lets GPUI expose a label to the accessibility tree and report content changes under a stable identity. `text!(id = "activity-label", value)` sets an explicit ID when the same call site creates multiple labels; each simultaneously rendered element needs a distinct ID. A plain `.child("Recent activity")` also lays out and paints text, but has no text-node ID. Neither form returns a measured width from `render`: GPUI shapes it during the element's measured-layout callback, places its bounds in prepaint, then paints it.
 
 GPUI Kit's [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/text/compat.rs) renders Markdown or HTML with styled runs, selection, and optional scrolling; it delegates parsing, layout, and selection behavior to Base. Use `TextView::markdown("article", source)` for a rich document. [Input](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) shapes visible lines in [`prepaint`](element.md#prepaint), where the resolved width and input geometry are known; its caret and pointer mapping use the same shaped layout. A plain label needs neither implementation.
+
+`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` checks whether a window-coordinate point hits registered selectable text in the active selection scope. Call it during pointer dispatch with the event's position, so the hitboxes reflect the queried point. It uses the current frame's text geometry and hitboxes without starting or changing a selection; blank space, text outside the active scope, and touch-selection controls do not match. A containing control can use this query before claiming a long press so window-level word selection keeps priority. `ContextMenu` does this automatically: long-pressing selectable text selects it, while long-pressing blank space opens the object's menu.
 
 ## Font resolution and metrics
 

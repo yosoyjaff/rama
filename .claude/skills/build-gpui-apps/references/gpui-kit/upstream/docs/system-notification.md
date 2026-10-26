@@ -60,7 +60,7 @@ Treat permission as part of the product flow: keep the task result in applicatio
 
 ## Post with the raw GPUI API
 
-The project pins `gpui-pre 0.3.7`. Its [`App::show_system_notification`](https://docs.rs/gpui-pre/0.3.7/gpui/struct.App.html#method.show_system_notification) accepts a `SystemNotification` with `tag`, `title`, `body`, and `actions`:
+The project pins `gpui-pre 0.3.10`. Its [`App::show_system_notification`](https://docs.rs/gpui-pre/0.3.10/gpui/struct.App.html#method.show_system_notification) accepts a `SystemNotification` with `tag`, `title`, `body`, and `actions`:
 
 ```rust
 use gpui_kit::SystemNotification;

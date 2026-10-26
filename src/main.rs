@@ -65,18 +65,11 @@ fn main() {
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
                 let shell = cx.new(|cx| Shell::new(window, cx));
-                // Root is required as the window's first level: it owns the
-                // dialog, sheet and notification layers, modal focus
-                // restoration and the window's rem size.
-                // Unbordered: the window draws its own frame (see
-                // `ui::window_frame`), and gpui-kit's square border with its
-                // grey line is what that frame replaces. Transparent, so the
-                // corners outside the shell's curve stay unpainted.
-                cx.new(|cx| {
-                    Root::new(shell, window, cx)
-                        .bordered(false)
-                        .bg(gpui_kit::transparent_black())
-                })
+                // Root is required as the window's first level: it mounts the
+                // dialog, sheet and notification layers, and owns modal focus
+                // restoration and the window's rem size. On Linux it also
+                // draws the window's frame (see `ui::window_frame`).
+                cx.new(|cx| Root::new(shell, window, cx))
             })
             .expect("failed to open the main window");
             // The window is up: only now does the network get asked whether
@@ -119,13 +112,13 @@ fn window_options(cx: &mut App) -> WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(MIN_WIDTH), px(MIN_HEIGHT))),
         app_id: Some(APP_ID.to_owned()),
-        // Linux: our own frame — the title band, the caption buttons, the
-        // rounded corners and the resize edges (`ui::window_frame`). Unset,
+        // Linux: our own title band and caption buttons, inside gpui-kit's
+        // frame with its border and resize edges (`ui::window_frame`). Unset,
         // this asks for SERVER decorations, which stacks a compositor title
         // bar over ours where the compositor has one, and leaves a square,
         // edge-less window on GNOME, which never does.
         window_decorations: cfg!(target_os = "linux").then_some(WindowDecorations::Client),
-        // The corners outside the rounded frame have to be see-through.
+        // The shadow around gpui-kit's frame has to be see-through.
         window_background: if cfg!(target_os = "linux") {
             WindowBackgroundAppearance::Transparent
         } else {

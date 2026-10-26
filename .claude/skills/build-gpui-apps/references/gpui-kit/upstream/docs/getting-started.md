@@ -18,10 +18,66 @@ Add GPUI Kit to the generated `Cargo.toml`:
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "0.8.1"
 ```
 
 This single dependency includes GPUI, GPUI Base, the styled GPUI Component library and its default icon assets. Application code accesses GPUI through `use gpui_kit::*;` and components through `gpui_kit::component`. You can change the feature selection later; see [Icons & Assets](assets.md).
+
+### Use GPUI Fast
+
+GPUI Kit uses the pinned upstream GPUI snapshot by default. To select GPUI Fast's
+retained rendering and layout engine, enable `gpui-fast`:
+
+```toml
+[dependencies]
+gpui-kit = { version = "0.8.1", features = ["gpui-fast"] }
+```
+
+The feature switches GPUI, native platforms, the WebAssembly backend, and every
+enabled Kit layer together. Keep using `gpui_kit::*`, `gpui_kit::component`, and
+`#[gpui_kit::test]`; no `[patch]`, extra engine dependency, or crate alias is needed.
+It also works with `default-features = false` and with `assets`, `test-support`,
+`inspector`, or `profiler`. GPUI Fast dependencies use `0.1.0` requirements, so
+`cargo update` can select compatible `0.1.x` releases.
+
+Cargo features are additive: enabling Fast selects its public types for the whole
+dependency graph, while upstream packages remain build dependencies. Avoid mixing
+Kit's Fast types with a direct dependency on upstream GPUI. For standalone Base,
+Component, assets, FPS, WebView, or Shell consumers, enable their `gpui-fast`
+feature too when selecting a backend explicitly.
+
+From this checkout, compare the gallery with `cargo run` and
+`cargo run --features gpui-fast`. WebAssembly builds use the nightly toolchain
+described in [WebAssembly](webassembly.md).
+
+### macOS text rendering: `font-kit`
+
+**macOS needs the `font-kit` feature on `gpui-pre-platform` to render text.**
+The `gpui-kit` dependency above already enables it, so this guide needs no
+additional dependency or feature setting.
+
+If you maintain an application that depends on GPUI directly, enable the feature
+on the `gpui_platform` dependency instead. For a macOS-only GPUI application,
+the dependency entries are:
+
+```toml
+[dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.10" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit"] }
+```
+
+Keep any other platform features your application uses, and keep the GPUI
+snapshot versions aligned. This is an alternative for direct GPUI users; keep
+the single `gpui-kit` dependency for the Kit example below. Do not add
+`features = ["font-kit"]` to `gpui` or `gpui-kit`, or add a separate `font-kit`
+dependency: the feature belongs to `gpui-pre-platform` and enables
+`gpui-pre-macos/font-kit`.
+
+`gpui-pre-platform` does not enable `font-kit` by default. Without it, the macOS
+backend uses `NoopTextSystem`: a window can open while no text is rendered,
+and `all_font_names()` returns an empty list. After updating your manifest,
+rebuild with `cargo run`. On macOS, `cargo tree -e features -i gpui-pre-macos`
+shows which dependencies enable the backend's features; check for `font-kit`.
 
 ## Add a view
 

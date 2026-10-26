@@ -52,7 +52,7 @@ cat > dist/HelloWorld.app/Contents/Info.plist <<'PLIST'
   <key>CFBundleIdentifier</key><string>com.example.helloworld</string>
   <key>CFBundleExecutable</key><string>hello_world</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.6.5</string>
+  <key>CFBundleShortVersionString</key><string>0.8.1</string>
   <key>CFBundleVersion</key><string>1</string>
 </dict></plist>
 PLIST
@@ -94,7 +94,7 @@ Test by extracting the ZIP into a fresh directory and launching the extracted `.
 [Setup]
 AppId=Example.HelloWorld
 AppName=HelloWorld
-AppVersion=0.6.5
+AppVersion=0.8.1
 DefaultDirName={autopf}\HelloWorld
 DefaultGroupName=HelloWorld
 OutputDir=dist
@@ -267,7 +267,7 @@ Use a stable package name and an architecture/version that match the binary. A m
 
 ```text
 Package: hello-world-gpui
-Version: 0.6.5
+Version: 0.8.1
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -290,12 +290,12 @@ Categories=Utility;
 When all staged files are present, build and inspect the package. The [documented `--root-owner-group` option](https://manpages.debian.org/unstable/dpkg/dpkg-deb.1.en.html) records root ownership for staged package files even when you build as a regular user; use it when all packaged files should be root-owned.
 
 ```sh
-dpkg-deb --root-owner-group --build dist/deb-root dist/hello-world-gpui_0.6.5_amd64.deb
-dpkg-deb --info dist/hello-world-gpui_0.6.5_amd64.deb
-dpkg-deb --contents dist/hello-world-gpui_0.6.5_amd64.deb
+dpkg-deb --root-owner-group --build dist/deb-root dist/hello-world-gpui_0.8.1_amd64.deb
+dpkg-deb --info dist/hello-world-gpui_0.8.1_amd64.deb
+dpkg-deb --contents dist/hello-world-gpui_0.8.1_amd64.deb
 ```
 
-Install a copy on a clean test machine with `sudo apt install ./dist/hello-world-gpui_0.6.5_amd64.deb`, launch it from the desktop menu, then remove it with `sudo apt remove hello-world-gpui`. [Debian policy](https://www.debian.org/doc/debian-policy/ch-opersys.html) prohibits packages from placing their files in `/usr/local`; the [Desktop Entry specification](https://specifications.freedesktop.org/desktop-entry/latest-single/) defines the launcher keys. Use a separate RPM packaging recipe for RPM distributions.
+Install a copy on a clean test machine with `sudo apt install ./dist/hello-world-gpui_0.8.1_amd64.deb`, launch it from the desktop menu, then remove it with `sudo apt remove hello-world-gpui`. [Debian policy](https://www.debian.org/doc/debian-policy/ch-opersys.html) prohibits packages from placing their files in `/usr/local`; the [Desktop Entry specification](https://specifications.freedesktop.org/desktop-entry/latest-single/) defines the launcher keys. Use a separate RPM packaging recipe for RPM distributions.
 
 ## Verify the release artifact
 
@@ -307,7 +307,7 @@ Do the final checks against the **downloaded package**, not the original build d
 4. Install version N, install N+1 over it, and check both application data and shortcuts. Then uninstall and check which files remain by design. Test portable archives separately because they have no package-managed upgrade or removal.
 5. Verify signatures and notarization where applicable, publish SHA-256 checksums, and download the artifact again to compare its checksum before announcing it.
 
-Package format does not guarantee platform support for every optional feature. In particular, check the [WebView](webview.md) target limitations before promising a Linux WebView build.
+Package format does not guarantee platform support for every optional feature. In particular, a Linux [WebView](webview.md#linux) build needs WebKitGTK on the target and runs on X11, or XWayland in a Wayland session.
 For in-app version checks and upgrades after packaging, continue with [Auto Update](auto-update.md).
 
 > Documentation license: original prose and illustrations for which GPUI Kit holds licensing rights are also offered under CC BY 4.0. When copying or adapting, credit GPUI Kit, link the source (https://gpui-kit.com/docs/packaging) and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples and software source use Apache-2.0; third-party material retains its terms; existing Apache-2.0 permissions remain.

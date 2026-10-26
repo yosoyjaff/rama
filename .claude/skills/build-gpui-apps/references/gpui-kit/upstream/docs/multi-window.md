@@ -20,7 +20,7 @@ In `Cargo.toml`, add the same single dependency used by [Getting Started](gettin
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "0.8.1"
 ```
 
 Replace `src/main.rs` with the complete example below. If you already have a single-window application, keep its `application().run(...)` and `init(cx)` calls; create the shared model once in that startup closure, then call `open_window` a second time with a new content view. The loop below performs both calls explicitly, once for each name.
@@ -172,7 +172,7 @@ Here `saved_bounds` is a `WindowBounds` captured from a prior window; saving and
 
 ## Test the boundaries
 
-In a [`TestAppContext` test](test.md), open two windows through `gpui_kit::open_window`, update the shared Entity, and assert both views change while window-local state stays independent. Close the first with `window.remove_window()`; its handle update should return an error, while the second window should still render and accept input. Run the repository's existing lifecycle coverage with `cargo test -p gpui-kit --features test-support --test lifecycle closing_one_window_preserves_other_window_and_owned_snapshot`; the [test source](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/tests/lifecycle.rs) exercises the close boundary. For this example, also verify the two visible counts and close behavior with `cargo run` in the new project.
+In a [`TestAppContext` test](test.md), open two windows through `gpui_kit::open_window`, update the shared Entity, and assert both views change while window-local state stays independent. Close the first with `window.remove_window()`; its handle update should return an error, while the second window should still render and accept input. Run the repository's existing lifecycle coverage with `cargo test -p gpui-kit --features test-support --test integration lifecycle::closing_one_window_preserves_other_window_and_owned_snapshot`; the [test source](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/tests/integration/lifecycle.rs) exercises the close boundary. For this example, also verify the two visible counts and close behavior with `cargo run` in the new project.
 
 ## Troubleshoot the example
 

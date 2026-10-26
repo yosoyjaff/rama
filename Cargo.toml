@@ -1,7 +1,7 @@
 [package]
 name = "rama"
 description = "Rama, a native Git desktop client built on GPUI Kit."
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/yosoyjaff/rama"
@@ -17,7 +17,7 @@ path = "src/main.rs"
 # behavior layer (`gpui_kit::base`) and the bundled icons (`gpui_kit::assets`).
 # Never add `gpui` directly: two GPUI revisions in one graph are two different
 # crates, and every type crossing that seam stops matching.
-gpui-kit = "0.6.6"
+gpui-kit = "0.8.1"
 
 anyhow = "1"
 # Author photographs: one small GET per avatar, into a disk cache. Blocking
@@ -59,7 +59,7 @@ embed-resource = "3.0.11"
 # The test harness: a headless app and window, for the views that can only be
 # checked by running them. Behind a feature, because it replaces the platform
 # layer and must never reach a release build.
-gpui-kit = { version = "0.6.6", features = ["test-support"] }
+gpui-kit = { version = "0.8.1", features = ["test-support"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -4,6 +4,18 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.2.0] - 2026-10-26
+
+### Added
+- The Branch column in the history can be resized from the divider before
+  "Commit"; its width is saved, and a double click resets it.
+
+### Changed
+- Built on GPUI Kit 0.8. On Linux the window now has a square frame.
+
+### Fixed
+- "Load more" at the bottom of the history no longer scrolls back to the top.
+
 ## [0.1.0] - 2026-10-21
 
 First public release.

@@ -352,7 +352,7 @@ An Entity can coordinate with another Entity in two related ways:
 
 They are separate signals: `notify()` does not emit an Event, and `emit(event)` does not by itself notify renderers. A state change that needs both a redraw and a semantic event can do both deliberately, usually once each. An observer can inspect the observed Entity with the handle it receives; it must still avoid re-entering an Entity already borrowed by the callback chain. GPUI delivers these callbacks through its effect cycle, after the current update's borrow has ended; do not rely on the callback having run inside the `update` closure.
 
-Store the [`Subscription`](https://docs.rs/gpui-pre/0.3.7/gpui/struct.Subscription.html) returned by `observe` or `subscribe` on the subscribing Entity, in a `_subscription` field or a `_subscriptions: Vec<Subscription>` field:
+Store the [`Subscription`](https://docs.rs/gpui-pre/0.3.10/gpui/struct.Subscription.html) returned by `observe` or `subscribe` on the subscribing Entity, in a `_subscription` field or a `_subscriptions: Vec<Subscription>` field:
 
 ```rs
 enum ChatEvent {
@@ -464,8 +464,8 @@ An `Entity<T: Render>` can be embedded directly as a child View. Its `EntityId` 
 
 For an expensive child that often stays unchanged while its parent redraws, GPUI also exposes `child.clone().cached(style)` and the equivalent `AnyView::cached(style)`. The parent must retain the same child Entity, and `style` must provide a definite outer size because GPUI can skip rendering the contents during layout. A clean cached child may replay its previous subtree; notifications, changed bounds or inherited drawing context cause a rebuild. See [View Cache](view-cache.md) for the exact boundary and how it differs from element state and virtualization.
 
-[Entity]: https://docs.rs/gpui-pre/0.3.7/gpui/struct.Entity.html
-[WeakEntity]: https://docs.rs/gpui-pre/0.3.7/gpui/struct.WeakEntity.html
+[Entity]: https://docs.rs/gpui-pre/0.3.10/gpui/struct.Entity.html
+[WeakEntity]: https://docs.rs/gpui-pre/0.3.10/gpui/struct.WeakEntity.html
 [Event]: ./event.md
 
 > Documentation license: original prose and illustrations for which GPUI Kit holds licensing rights are also offered under CC BY 4.0. When copying or adapting, credit GPUI Kit, link the source (https://gpui-kit.com/docs/entity) and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples and software source use Apache-2.0; third-party material retains its terms; existing Apache-2.0 permissions remain.

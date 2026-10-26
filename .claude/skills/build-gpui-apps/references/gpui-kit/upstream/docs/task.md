@@ -5,7 +5,7 @@ description: Run asynchronous work with GPUI Task, control its lifetime, and ret
 
 # Task
 
-In GPUI, a [`Task<T>`](https://docs.rs/gpui-pre/0.3.7/gpui/struct.Task.html) is the handle to work scheduled by a GPUI executor. Its most important property is **ownership**: dropping the handle cancels unfinished work. A task runs only while its handle is stored, awaited, or explicitly detached. This makes the task's lifetime part of the View's state design, not just a detail of Rust's `Future` trait.
+In GPUI, a [`Task<T>`](https://docs.rs/gpui-pre/0.3.10/gpui/struct.Task.html) is the handle to work scheduled by a GPUI executor. Its most important property is **ownership**: dropping the handle cancels unfinished work. A task runs only while its handle is stored, awaited, or explicitly detached. This makes the task's lifetime part of the View's state design, not just a detail of Rust's `Future` trait.
 
 The **spawn API** chooses where work runs; the returned `Task` controls its lifetime. A foreground task can re-enter GPUI through an async [Context](context.md) and update an [Entity]. A background task runs away from the UI thread and returns owned data; it cannot mutate Entity state there.
 

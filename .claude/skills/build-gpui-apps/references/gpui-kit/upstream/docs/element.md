@@ -538,9 +538,9 @@ When an existing interactive element such as `div()` already provides the behavi
 `Element::id()` returning an `ElementId` does more than label pixels: it creates stable identity across frames. Keep IDs unique within their nearest keyed ancestor, and do not add an ID unless the element or an attached behavior needs identity.
 :::
 
-[Element]: https://docs.rs/gpui-pre/0.3.7/gpui/trait.Element.html
-[IntoElement]: https://docs.rs/gpui-pre/0.3.7/gpui/trait.IntoElement.html
-[AnyElement]: https://docs.rs/gpui-pre/0.3.7/gpui/struct.AnyElement.html
+[Element]: https://docs.rs/gpui-pre/0.3.10/gpui/trait.Element.html
+[IntoElement]: https://docs.rs/gpui-pre/0.3.10/gpui/trait.IntoElement.html
+[AnyElement]: https://docs.rs/gpui-pre/0.3.10/gpui/struct.AnyElement.html
 
 > Documentation license: original prose and illustrations for which GPUI Kit holds licensing rights are also offered under CC BY 4.0. When copying or adapting, credit GPUI Kit, link the source (https://gpui-kit.com/docs/element) and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples and software source use Apache-2.0; third-party material retains its terms; existing Apache-2.0 permissions remain.
 

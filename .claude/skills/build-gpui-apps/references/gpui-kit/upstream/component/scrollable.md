@@ -326,6 +326,35 @@ impl Render for DataTable {
 }
 ```
 
+## Scroll bounce
+
+```rust
+div()
+    .child(content)
+    .overflow_y_scrollbar()
+    .scroll_bounce(true)
+```
+
+`scroll_bounce(true)` lets overflowing vertical content stretch at its ends and
+spring back with precise pixel scrolling, such as a trackpad or Magic Mouse
+on macOS. Ordinary mouse wheels use line scrolling and do not bounce. A new
+precise gesture or reversed precise scroll takes over the return; ordinary
+wheel input cancels it and scrolls normally. The logical scroll position remains clamped,
+and scrollbars stay fixed. Content that fits does not bounce. It is enabled by default on iOS, Android and macOS, whose own scroll views bounce, and disabled elsewhere. Reduced motion disables displacement.
+
+Nested scroll areas follow the platform: the innermost one under the pointer
+takes the whole gesture and bounces at its own ends instead of handing the rest
+to the area around it. Text inputs, lists, tables and trees take part in the
+same rule.
+
+For a custom viewport, wrap it in
+`gpui_kit::base::ScrollBounce::new(id, &handle, child)`. The wrapper owns the
+vertical wheel scrolling and follows the platform default; `.enabled(false)`
+keeps the scrolling and drops the stretch. Keep fixed chrome outside the
+wrapper. `.scroll_wheel(false)` leaves scrolling to the child and only bounces
+its unused deltas, for touch input. Horizontal-only Scrollable containers do
+not bounce.
+
 > Documentation license: original prose and illustrations for which GPUI Kit holds licensing rights are also offered under CC BY 4.0. When copying or adapting, credit GPUI Kit, link the source (https://gpui-kit.com/component/scrollable) and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples and software source use Apache-2.0; third-party material retains its terms; existing Apache-2.0 permissions remain.
 
 > Bundled from [GPUI Kit](https://gpui-kit.com/component/scrollable.md). Documentation prose: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); code examples: [Apache-2.0](https://github.com/longbridge/gpui-kit/blob/main/LICENSE). Changes: documentation links localized, asset URLs made absolute, and this attribution added.

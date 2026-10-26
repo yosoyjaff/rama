@@ -44,6 +44,18 @@ TextView::markdown("preview", markdown_source)
 TextView::html("html-preview", "<strong>Hello</strong>")
 ```
 
+### Inside a colored surface
+
+A `TextView` without an explicit `.style()` follows the text color of its
+container. On a surface that is inverted from the page, such as a `Filled`
+[Bubble](bubble.md), links, muted text, code and table backgrounds, borders and
+selection are derived from that color as well, and syntax highlighting is left
+out, so the content needs no extra styling:
+
+```rust
+Bubble::new().child(TextView::markdown("reply", text))
+```
+
 ### Clamp to a number of lines
 
 Use `max_lines` to render a bounded preview of rich content — for example a
@@ -159,6 +171,58 @@ current text. Backgrounds that are part of the text, such as
 `<mark>` and syntax highlighting, paint over a range highlight (inline code's
 background is painted under it), and highlights do not fade in with streamed
 text. HTML views do not support range highlights.
+
+An application that keeps ranges of the Markdown source instead, such as the
+ranges `selected_source_range()` returns for the passages people comment on,
+converts each with `range_for_source` on the same `rendered_text()`:
+
+```rust
+use std::ops::Range;
+
+use gpui_kit::component::{
+    ActiveTheme as _,
+    text::{RangeHighlight, RangeHighlightError, TextViewState},
+};
+
+fn highlight_comments(
+    state: &mut TextViewState,
+    markdown: &str,
+    comments: &[Range<usize>],
+    cx: &mut Context<TextViewState>,
+) -> Result<(), RangeHighlightError> {
+    let text = state.rendered_text();
+    // The ranges index `markdown`. Until its parse lands, the view renders the
+    // source it had before; convert again when the view notifies.
+    if text.source() != markdown {
+        return Ok(());
+    }
+    let color = cx.theme().info.opacity(0.3);
+    let highlights = comments
+        .iter()
+        .filter_map(|comment| text.range_for_source(comment.clone()))
+        .map(|range| RangeHighlight::new(range, color));
+    state.set_range_highlights(highlights, cx)
+}
+```
+
+`range_for_source` returns the smallest range holding every character
+rendered from the source range. Source that renders nothing, such as emphasis
+delimiters, heading and list markers, code fences, table pipes and link
+destinations, adds nothing, so `**bold**` and `bold` convert to the same range.
+A character is included when any of its source is in the range: `&` for part
+of `&amp;`, or the whole text of an inline plugin object for part of its
+source. Converting the source range a selection reports gives the selected
+range back, except that a line break between blocks at either end of the
+selection is rendered from no source and is left out: Select All gives back
+everything but the line break after the last block.
+
+`rendered_text().source()` is the source of the last parse that landed. While
+text is appended with `push_str`, it is a prefix of the text the view was
+given; after `set_text` replaces the content, it can be the earlier, unrelated
+text until the new parse lands, so compare it with the source your ranges
+index, as the example does, before converting. The result is
+`None` when the range is empty, out of bounds or not on a character boundary,
+when nothing is rendered from it, and always in HTML views.
 
 ### Scroll to a range
 
@@ -426,6 +490,72 @@ markdown(source)
         gpui_kit::div().child(format!("Run {}", code_block.lang().unwrap_or_default()))
     })
 ```
+
+## Inline code style
+
+`TextView::inline_code_style(StyleRefinement)` refines inline code after the
+resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The existing `TextViewStyle::inline_code(HighlightStyle)` continues to work;
+the view-level refinement takes precedence without changing the public
+`TextViewStyle` struct fields.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _, rems};
+use gpui_kit::component::ActiveTheme as _;
+
+TextView::markdown("notes", "Run `cargo build` first.")
+    .inline_code_style(
+        StyleRefinement::default()
+            .text_size(rems(1.))
+            .px(rems(0.25))
+            .border_1()
+            .border_color(cx.theme().border),
+    )
+```
+
+Supported properties are font family, size, features, fallbacks, weight,
+italic, color, underline, strikethrough, background, border widths/color/style,
+corner radii, and padding. Font sizes use pixels or window-relative rems;
+non-finite or non-positive sizes retain the default. Without a font-size override,
+code remains 0.875 times its surrounding text. Without a border override, code
+has no border. Padding and border widths participate in wrapping and table
+measurement. Margin, positioning, flex, explicit box size, overflow, and
+interaction properties are not used; line height remains owned by the paragraph.
+
+## List and blockquote style
+
+`TextView::list_style(StyleRefinement)` and
+`blockquote_style(StyleRefinement)` refine list markers and blockquotes after
+the resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The public `TextViewStyle` struct fields are unchanged.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _};
+use gpui_kit::component::ActiveTheme as _;
+
+TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
+    .list_style(StyleRefinement::default().text_color(cx.theme().primary))
+    .blockquote_style(StyleRefinement::default().border_color(cx.theme().primary))
+```
+
+The list marker refinement applies to the bullet or number column of each
+item, over its defaults: muted text color, a minimum width of the list indent,
+right-aligned text, and a right padding of 0.3 times that indent. Text
+properties such as color, font family, size, and weight style the marker; box
+properties such as width and padding change the marker column. Its text color
+also outlines an unchecked task-list checkbox; a checked one keeps the link
+color.
+
+The blockquote refinement applies to the quote container, over its defaults:
+muted text color, a 2px left border in the border color, and a left padding of
+0.9 times the body font size. Border widths and color style the quote bar;
+text properties, background, padding, and corner radii style the quote and the
+blocks inside it. Child blocks keep their own explicit styles, including
+heading and table font sizes. Other element properties apply to the container
+as they do to any `div`. Code blocks, tables, rules, and done tasks keep the
+shared muted and border colors.
 
 > Documentation license: original prose and illustrations for which GPUI Kit holds licensing rights are also offered under CC BY 4.0. When copying or adapting, credit GPUI Kit, link the source (https://gpui-kit.com/component/text-view) and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples and software source use Apache-2.0; third-party material retains its terms; existing Apache-2.0 permissions remain.
 

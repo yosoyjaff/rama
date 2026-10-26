@@ -136,6 +136,9 @@ The first build compiles GPUI and takes a few minutes; later builds are fast.
 4. **Multi-language interface:** every screen, menu and message translatable,
    starting with Spanish, following the system language with an override in
    Settings, and open to community translations.
+5. **A responsive commit graph:** lanes and lines that adapt smoothly to the
+   width they have, so resizing the window or the columns beside the graph
+   never squeezes, jumps or collapses it abruptly.
 
 Have an idea? [Open a feature request](https://github.com/yosoyjaff/rama/issues/new?template=feature_request.yml).
 

@@ -30,8 +30,8 @@ Install the native toolchain for your operating system, then add the `gpui-kit` 
       <pre><code class="language-bash">sudo apt update
 sudo apt install -y gcc g++ clang libfontconfig-dev libwayland-dev \
   libwebkit2gtk-4.1-dev libxkbcommon-x11-dev libx11-xcb-dev \
-  libssl-dev libzstd-dev vulkan-validationlayers libvulkan1</code></pre>
-      <p>This matches the repository's <code>script/install-linux.sh</code> for Ubuntu 24.04. Other distributions need equivalent development packages. To display a window, run in a graphical Wayland or X11 session with a working Vulkan driver; installing <code>libvulkan1</code> alone does not install a GPU driver.</p>
+  libssl-dev libzstd-dev libasound2-dev vulkan-validationlayers libvulkan1</code></pre>
+      <p>This matches the repository's <code>script/install-linux.sh</code> for Ubuntu 24.04. Other distributions need equivalent development packages. <code>libasound2-dev</code> (ALSA) is needed only by the <code>speech</code> feature. To display a window, run in a graphical Wayland or X11 session with a working Vulkan driver; installing <code>libvulkan1</code> alone does not install a GPU driver.</p>
     </section>
   </div>
 </div>
@@ -50,14 +50,33 @@ Both commands should print a version. On Windows, <code>rustup show active-toolc
 Add GPUI Kit to the application's `Cargo.toml` under `[dependencies]`:
 
 ```toml
-gpui-kit = "0.6"
+gpui-kit = "0.8.1"
 ```
 
-The `0.6` requirement selects a compatible 0.6.x Kit release; this repository currently declares version `0.6.5`. Kit's default features include the styled components and default icon assets. It brings in matching GPUI crates, so an application using this setup does not need to list GPUI separately. `use gpui_kit::*;` imports GPUI's re-exported API; the layers are reachable as `gpui_kit::component`, `gpui_kit::base`, `gpui_kit::assets`, and `gpui_kit::platform`.
+The `0.8.1` requirement selects a compatible Kit release. Kit's default features include the styled components and default icon assets. It brings in matching GPUI crates, so an application using this setup does not need to list GPUI separately. `use gpui_kit::*;` imports GPUI's re-exported API; the layers are reachable as `gpui_kit::component`, `gpui_kit::base`, `gpui_kit::assets`, and `gpui_kit::platform`.
+
+### Optional GPUI Fast backend
+
+Enable `gpui-fast` to use [GPUI Fast](https://github.com/longbridge/gpui-fast)
+for rendering, layout, and platforms:
+
+```toml
+gpui-kit = { version = "0.8.1", features = ["gpui-fast"] }
+```
+
+This selects `gpui-fast`, `gpui-fast-platform`, and the matching web backend
+across all enabled Kit layers. Keep the same `gpui_kit::*` imports and startup
+code; no application `[patch]` or crate alias is needed. Without this feature,
+Kit continues to use the upstream snapshot described below. Fast dependencies
+allow compatible `0.1.x` updates through `cargo update`.
+
+Cargo features are additive, so upstream packages still compile when Fast is
+selected. For feature combinations and backend comparison commands, see
+[Getting Started](getting-started.md#use-gpui-fast).
 
 ### Why the dependency is named `gpui-pre`
 
-Throughout these docs, **GPUI** means [Zed's GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui). `gpui-pre` is the crates.io package name used to publish a snapshot of GPUI from a recorded Zed commit, alongside its related GPUI crates. It provides a reproducible publication and version alignment path for GPUI Kit; it is not another rendering implementation. The publication process adjusts package names and dependency manifests for crates.io, so API references in this manual target the GPUI version pinned by this Kit release. In this repository that is `gpui-pre = 0.3.7`; application code normally depends only on `gpui-kit` and imports GPUI through `gpui_kit::*`. A newer `gpui-pre` snapshot does not by itself mean that the current GPUI Kit release supports it.
+Throughout these docs, **GPUI** means [Zed's GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui). `gpui-pre` is the crates.io package name used to publish a snapshot of GPUI from a recorded Zed commit, alongside its related GPUI crates. It provides a reproducible publication and version alignment path for GPUI Kit; it is not another rendering implementation. The publication process adjusts package names and dependency manifests for crates.io, so API references in this manual target the GPUI version pinned by this Kit release. In this repository that is `gpui-pre = 0.3.10`; application code normally depends only on `gpui-kit` and imports GPUI through `gpui_kit::*`. A newer `gpui-pre` snapshot does not by itself mean that the current GPUI Kit release supports it.
 
 ## Verify the installation
 
@@ -80,6 +99,7 @@ For a new project instead, follow [Getting Started](getting-started.md). It crea
 | Windows reports `link.exe` missing or cannot find a Windows SDK. | Confirm the Visual Studio C++ workload and SDK are installed, then build with an MSVC Rust toolchain from a Visual Studio Developer PowerShell if needed. |
 | Linux reports a missing `pkg-config` executable, X11, Wayland, fontconfig, or WebKit header. | Install the Ubuntu packages above, or their equivalents for your distribution. If `pkg-config` itself is missing, install the `pkg-config` package too. The error identifies the missing tool or system library. |
 | The program compiles but no window appears on Linux. | Check that the process is running in a graphical Wayland or X11 session and that a Vulkan driver works for that session. A headless shell or Vulkan loader without a driver is insufficient. |
+| A window opens on macOS, but no text is rendered. | If you depend on GPUI directly, enable `font-kit` on `gpui-pre-platform` and rebuild. `gpui-kit` already enables it. See [Getting Started](getting-started.md#macos-text-rendering-font-kit) for the manifest and feature check. |
 | Cargo cannot resolve `gpui-pre` or APIs differ from these examples. | Keep the `gpui-kit` requirement and update dependencies together. Kit pins a matching `gpui-pre-*` snapshot; do not override one GPUI package to a different version. In a repository checkout, use the checked-in `Cargo.lock`. |
 
 For errors after a window opens, continue with [Getting Started](getting-started.md) and inspect the relevant guide for the feature you are using.
@@ -90,7 +110,9 @@ Rust Debug builds leave GPUI, the component library, layout, and text rendering
 largely unoptimized. As a result, an application started with `cargo run` can
 render and respond much more slowly than its release build. The profile below
 optimizes those framework dependencies while your application code remains in
-Debug mode and keeps its normal debugging workflow.
+Debug mode and keeps its normal debugging workflow. Leave proc-macro crates such
+as `gpui-pre-macros` out: they only run inside the compiler, so optimizing them
+adds compile time without making the application faster.
 
 This setting does **not** make compilation faster. Compiling the optimized
 dependencies can take longer, especially on the first build; the benefit is
@@ -104,7 +126,6 @@ gpui-pre = { opt-level = 3 }
 gpui-component = { opt-level = 3 }
 gpui-kit = { opt-level = 3 }
 gpui-kit-assets = { opt-level = 3 }
-gpui-pre-macros = { opt-level = 3 }
 gpui-pre-platform = { opt-level = 3 }
 rustybuzz = { opt-level = 3 }
 taffy = { opt-level = 3 }
