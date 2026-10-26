@@ -105,12 +105,11 @@ impl ColumnLayout {
     }
 }
 
-/// One side of a divider: the subject, which takes what is left over, the
-/// branch column before the graph, or a column with a width of its own.
+/// One side of a divider: the subject, which takes what is left over, or a
+/// column with a width of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Edge {
     Subject,
-    Branch,
     Column(ColumnId),
 }
 
@@ -118,7 +117,6 @@ impl Edge {
     pub fn width(self, columns: &Columns) -> f32 {
         match self {
             Edge::Subject => SUBJECT_MIN,
-            Edge::Branch => columns.branch,
             Edge::Column(id) => columns.get(id).width,
         }
     }
@@ -127,16 +125,13 @@ impl Edge {
     pub fn limits(self) -> (f32, f32) {
         match self {
             Edge::Subject => (SUBJECT_MIN, f32::INFINITY),
-            Edge::Branch => Columns::BRANCH_LIMITS,
             Edge::Column(id) => id.limits(),
         }
     }
 
     fn write(self, columns: &mut Columns, width: f32) {
-        match self {
-            Edge::Subject => {}
-            Edge::Branch => columns.branch = width,
-            Edge::Column(id) => columns.get_mut(id).width = width,
+        if let Edge::Column(id) = self {
+            columns.get_mut(id).width = width;
         }
     }
 }
@@ -165,23 +160,18 @@ impl Divider {
 
     /// `columns` with the divider dragged to `x`.
     ///
-    /// Beside the subject, only the other column changes: the subject takes
+    /// Beside the subject, only the right column changes: the subject takes
     /// up the slack. Between two columns, width passes from one to the other
     /// with their sum fixed, and stops where either would leave its limits.
     pub fn dragged_to(&self, x: f32, columns: &mut Columns) {
         let shift = x - self.grabbed_at;
         let (right_min, right_max) = self.right.limits();
-        let (left_min, left_max) = self.left.limits();
         if self.left == Edge::Subject {
             let right = (self.right_was - shift).clamp(right_min, right_max);
             self.right.write(columns, right);
             return;
         }
-        if self.right == Edge::Subject {
-            let left = (self.left_was + shift).clamp(left_min, left_max);
-            self.left.write(columns, left);
-            return;
-        }
+        let (left_min, left_max) = self.left.limits();
         let sum = self.left_was + self.right_was;
         let low = left_min.max(sum - right_max);
         let high = left_max.min(sum - right_min);
@@ -302,18 +292,6 @@ mod tests {
         assert_eq!((columns.date.width, columns.author.width), (70.0, 120.0));
         divider.dragged_to(-1000.0, &mut columns);
         assert_eq!(columns.date.width, Date.limits().1);
-    }
-
-    #[test]
-    fn the_branch_column_resizes_alone_within_its_limits() {
-        let layout = layout(vec![Author, Date, Sha]);
-        let divider = Divider::grab(Edge::Branch, Edge::Subject, 160.0, &layout.columns);
-        let mut columns = layout.columns.clone();
-        divider.dragged_to(200.0, &mut columns);
-        assert_eq!(columns.branch, Columns::DEFAULT_BRANCH + 40.0);
-        assert_eq!(columns.author.width, 120.0);
-        divider.dragged_to(-1000.0, &mut columns);
-        assert_eq!(columns.branch, Columns::BRANCH_LIMITS.0);
     }
 
     #[test]

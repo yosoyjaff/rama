@@ -10,9 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
 
-use gpui_kit::{
-    App, ClipboardItem, Context, Entity, ListAlignment, ListState, SharedString, Task, px,
-};
+use gpui_kit::{ClipboardItem, Context, Entity, ListAlignment, ListState, SharedString, Task, px};
 
 use super::actions::LinearRun;
 use super::lanes::{Graph, branch_ref_key, collapse_branch_runs, lay_out, merge_stash_rows};
@@ -594,9 +592,9 @@ impl HistoryView {
     }
 
     /// Where the lanes begin: after the badges, when they are shown.
-    pub(super) fn lane_origin_x(&self, cx: &App) -> f32 {
+    pub(super) fn lane_origin_x(&self) -> f32 {
         if self.branch_column_open {
-            branch_column::refs_column_width(cx)
+            branch_column::REFS_COLUMN_WIDTH
         } else {
             0.0
         }
