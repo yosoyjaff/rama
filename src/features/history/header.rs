@@ -36,18 +36,19 @@ pub(super) struct HeaderGestures {
 pub(super) struct HeaderParts {
     columns: AnyElement,
     button: AnyElement,
-    /// The branch column's width, when the column is open.
-    badges: Option<f32>,
-    /// The divider at the left of "Commit" that resizes the branch column.
-    branch_divider: Option<AnyElement>,
+    badges: bool,
     ink: Hsla,
 }
 
 impl HeaderParts {
     pub(super) fn assemble(self, graph_slot: AnyElement) -> AnyElement {
-        let badges = self
-            .badges
-            .map(|width| div().flex_none().w(px(width)).pl(px(8.0)).child("Branch"));
+        let badges = self.badges.then(|| {
+            div()
+                .flex_none()
+                .w(px(branch_column::REFS_COLUMN_WIDTH))
+                .pl(px(8.0))
+                .child("Branch")
+        });
         div()
             .id(BAND_GROUP)
             .group(BAND_GROUP)
@@ -62,17 +63,7 @@ impl HeaderParts {
             .text_color(self.ink)
             .children(badges)
             .child(graph_slot)
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_w(px(SUBJECT_MIN))
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .child("Commit")
-                    .children(self.branch_divider),
-            )
+            .child(div().flex_1().min_w(px(SUBJECT_MIN)).child("Commit"))
             .child(self.columns)
             .child(self.button)
             .into_any_element()
@@ -84,7 +75,7 @@ impl HistoryView {
     /// columns, and the badges column when it is open.
     pub(super) fn width_beside_graph(&self, cx: &Context<Self>) -> f32 {
         let badges = if self.branch_column_open {
-            branch_column::refs_column_width(cx)
+            branch_column::REFS_COLUMN_WIDTH
         } else {
             0.0
         };
@@ -96,10 +87,7 @@ impl HistoryView {
         HeaderParts {
             columns: self.render_column_strip(&layout, theme, cx),
             button: self.render_menu_button(theme, cx),
-            badges: self.branch_column_open.then_some(layout.columns.branch),
-            branch_divider: self
-                .branch_column_open
-                .then(|| self.render_divider(Edge::Branch, Edge::Subject, theme, cx)),
+            badges: self.branch_column_open,
             ink: theme.text_faint,
         }
     }
@@ -207,8 +195,7 @@ impl HistoryView {
     }
 
     /// The divider between `left` and `right`, straddling the left edge of
-    /// the header it sits in. A double click puts every width back to its
-    /// default.
+    /// `right`. A double click puts every width back to its default.
     fn render_divider(
         &self,
         left: Edge,

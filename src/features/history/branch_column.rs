@@ -12,7 +12,7 @@ use std::cmp::Reverse;
 
 use crate::git::{Commit, RefBadge, RefKind};
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Context, ElementId, FontWeight, Hsla, MouseButton, MouseDownEvent,
+    AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla, MouseButton, MouseDownEvent,
     ObjectFit, SharedString, div, img, prelude::*, px,
 };
 
@@ -22,12 +22,9 @@ use crate::ui::icons;
 use crate::ui::theme::Theme;
 use crate::ui::tip::tip;
 
-/// Width of the column, as the header's divider left it. One width for
-/// every row, so the graph — and every node in it — starts at the same x on
-/// every row.
-pub fn refs_column_width(cx: &App) -> f32 {
-    crate::settings::read(cx, |s| s.history.columns.branch)
-}
+/// Width of the column. Fixed so the graph — and every node in it — starts
+/// at the same x on every row.
+pub const REFS_COLUMN_WIDTH: f32 = 160.0;
 
 /// Height of one label, and the gap from the column's left edge.
 const LABEL_HEIGHT: f32 = 22.0;
@@ -297,7 +294,7 @@ impl HistoryView {
             .id(ElementId::Name(format!("history-ref-zone-{sha}").into()))
             .relative()
             .flex_none()
-            .w(px(refs_column_width(cx)))
+            .w(px(REFS_COLUMN_WIDTH))
             .h_full()
             .pl(px(LABEL_INSET))
             .flex()
