@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
 
-use gpui_kit::{ClipboardItem, Context, Entity, ListAlignment, ListState, SharedString, Task, px};
+use gpui_kit::{
+    App, ClipboardItem, Context, Entity, ListAlignment, ListState, SharedString, Task, px,
+};
 
 use super::actions::LinearRun;
 use super::lanes::{Graph, branch_ref_key, collapse_branch_runs, lay_out, merge_stash_rows};
@@ -266,8 +268,14 @@ impl HistoryView {
             && self.folds.closed.is_empty()
             && self.stashes.is_empty()
             && !self.search.active();
-        if first || !plain {
+        if first {
             self.reset_list(cx);
+        } else if !plain {
+            // The rows are laid out again, but the view stays on the commit
+            // it was on rather than jumping back to the top.
+            let anchor = self.top_anchor();
+            self.reset_list(cx);
+            self.return_to(anchor);
         } else {
             self.show_derived_rows();
             self.list
@@ -586,9 +594,9 @@ impl HistoryView {
     }
 
     /// Where the lanes begin: after the badges, when they are shown.
-    pub(super) fn lane_origin_x(&self) -> f32 {
+    pub(super) fn lane_origin_x(&self, cx: &App) -> f32 {
         if self.branch_column_open {
-            branch_column::REFS_COLUMN_WIDTH
+            branch_column::refs_column_width(cx)
         } else {
             0.0
         }

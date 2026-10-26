@@ -158,7 +158,7 @@ pub(super) fn history_transition_rows(
 impl HistoryView {
     /// The commit at the top of the list and how far into its row, to come
     /// back to after the rows change.
-    fn top_anchor(&self) -> Option<ScrollAnchor> {
+    pub(super) fn top_anchor(&self) -> Option<ScrollAnchor> {
         let top = self.list.logical_scroll_top();
         let rows = &self.shown_rows;
         let (commit, offset) = match rows.get(top.item_ix) {
@@ -172,7 +172,7 @@ impl HistoryView {
         })
     }
 
-    fn return_to(&self, anchor: Option<ScrollAnchor>) {
+    pub(super) fn return_to(&self, anchor: Option<ScrollAnchor>) {
         let Some(anchor) = anchor else {
             return;
         };

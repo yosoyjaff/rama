@@ -6,7 +6,7 @@ use super::columns::SUBJECT_MIN;
 use std::time::Duration;
 
 use gpui_kit::{
-    AnyElement, Context, Entity, FontWeight, HighlightStyle, MouseButton, MouseDownEvent,
+    AnyElement, App, Context, Entity, FontWeight, HighlightStyle, MouseButton, MouseDownEvent,
     SharedString, StyledText, TextRun, Window, div, prelude::*, px,
 };
 
@@ -300,11 +300,11 @@ impl HistoryView {
 
     /// Room for the branch badges column, so the graph lines up with the
     /// commit rows below.
-    fn badge_gap(&self) -> Option<gpui_kit::Div> {
+    fn badge_gap(&self, cx: &App) -> Option<gpui_kit::Div> {
         self.branch_column_open.then(|| {
             div()
                 .flex_none()
-                .w(px(branch_column::REFS_COLUMN_WIDTH))
+                .w(px(branch_column::refs_column_width(cx)))
                 .h_full()
         })
     }
@@ -427,7 +427,7 @@ impl HistoryView {
                     cx.notify();
                 }),
             )
-            .children(self.badge_gap())
+            .children(self.badge_gap(cx))
             .child(node)
             .child(
                 div()

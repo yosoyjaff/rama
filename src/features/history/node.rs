@@ -54,7 +54,7 @@ impl HistoryView {
         let list = self.list.clone();
         let spread = self.sizing.shown.clone();
         // Lanes start after the branch badges.
-        let lane_start = self.lane_origin_x();
+        let lane_start = self.lane_origin_x(cx);
         // The tips overview has no lines between rows, even as a rail.
         let rail_allowed = self.scope == Scope::Everything;
         canvas(

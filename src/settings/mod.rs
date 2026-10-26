@@ -141,8 +141,9 @@ impl Default for Column {
     }
 }
 
-/// The optional columns. A hidden column keeps its place in `order`, so it
-/// comes back where it was.
+/// The optional columns, and the width of the branch column before the
+/// graph. A hidden column keeps its place in `order`, so it comes back where
+/// it was.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Columns {
@@ -150,6 +151,7 @@ pub struct Columns {
     pub date: Column,
     pub sha: Column,
     pub order: Vec<ColumnId>,
+    pub branch: f32,
 }
 
 impl Default for Columns {
@@ -159,12 +161,17 @@ impl Default for Columns {
             date: Column::default(),
             sha: Column::default(),
             order: ColumnId::EVERY.to_vec(),
+            branch: f32::NAN,
         }
         .sanitized()
     }
 }
 
 impl Columns {
+    /// How narrow and how wide the branch column may be dragged.
+    pub const BRANCH_LIMITS: (f32, f32) = (90.0, 360.0);
+    pub const DEFAULT_BRANCH: f32 = 160.0;
+
     pub fn get(&self, id: ColumnId) -> &Column {
         match id {
             ColumnId::Author => &self.author,
@@ -189,6 +196,7 @@ impl Columns {
             let column = self.get_mut(id);
             column.width = bounded(column.width, id.limits(), id.default_width());
         }
+        self.branch = bounded(self.branch, Self::BRANCH_LIMITS, Self::DEFAULT_BRANCH);
         let mut order = Vec::with_capacity(ColumnId::EVERY.len());
         for id in self.order.iter().copied().chain(ColumnId::EVERY) {
             if !order.contains(&id) {
@@ -204,6 +212,7 @@ impl Columns {
         for id in ColumnId::EVERY {
             self.get_mut(id).width = id.default_width();
         }
+        self.branch = Self::DEFAULT_BRANCH;
     }
 }
 
@@ -481,6 +490,7 @@ mod tests {
         settings.history.columns.author.width = 5_000.0;
         settings.history.columns.date.width = -3.0;
         settings.history.columns.sha.width = f32::NAN;
+        settings.history.columns.branch = 9_000.0;
         settings.history.panel.share = 0.99;
         settings.diff.split_share = f32::INFINITY;
         let fixed = settings.sanitized();
@@ -488,6 +498,7 @@ mod tests {
         assert_eq!(columns.author.width, ColumnId::Author.limits().1);
         assert_eq!(columns.date.width, ColumnId::Date.limits().0);
         assert_eq!(columns.sha.width, ColumnId::Sha.default_width());
+        assert_eq!(columns.branch, Columns::BRANCH_LIMITS.1);
         assert_eq!(fixed.history.panel.share, Panel::SHARE.1);
         assert_eq!(fixed.diff.split_share, Diff::DEFAULT_SPLIT_SHARE);
     }
@@ -518,6 +529,7 @@ mod tests {
             ColumnId::Date.default_width()
         );
         assert!(read.history.columns.author.shown);
+        assert_eq!(read.history.columns.branch, Columns::DEFAULT_BRANCH);
         assert_eq!(read.diff, Diff::default());
     }
 
@@ -526,8 +538,10 @@ mod tests {
         let mut columns = Columns::default();
         columns.sha.width = 100.0;
         columns.sha.shown = false;
+        columns.branch = 300.0;
         columns.reset_widths();
         assert_eq!(columns.sha.width, ColumnId::Sha.default_width());
+        assert_eq!(columns.branch, Columns::DEFAULT_BRANCH);
         assert!(!columns.sha.shown);
     }
 }
