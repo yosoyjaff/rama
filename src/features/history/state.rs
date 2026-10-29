@@ -444,15 +444,18 @@ impl HistoryView {
             .map(|repo| repo.operation.clone())
             .unwrap_or_default();
         let conflicted = status.entries.iter().filter(|e| e.conflicted).count();
+        let files = if conflicted == 1 { "file" } else { "files" };
         let subject = if conflicted == 0 {
             "Work in progress".to_owned()
+        } else if operation.state == OperationState::None {
+            // A stash that did not apply cleanly: nothing is coming in.
+            format!("{conflicted} {files} in conflict on {}", self.branch())
         } else {
             let incoming = operation.incoming.as_deref().unwrap_or("another branch");
             let ours = operation
                 .current_branch
                 .as_deref()
                 .unwrap_or_else(|| self.branch());
-            let files = if conflicted == 1 { "file" } else { "files" };
             format!(
                 "{conflicted} {files} in conflict · {} {incoming} {} {ours}",
                 operation.state.verb(),

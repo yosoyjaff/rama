@@ -114,10 +114,15 @@ impl Worktree {
     }
 
     /// Staged files that the operation had in conflict: the settled ones.
+    /// A stash that did not apply cleanly leaves no record of what it
+    /// conflicted on, so then every staged file counts.
     pub fn resolved(&self) -> Vec<DiffFileSummary> {
+        let staged = self.staging().staged;
+        if !self.in_operation() {
+            return staged;
+        }
         let was = &self.operation.originally_conflicted;
-        self.staging()
-            .staged
+        staged
             .into_iter()
             .filter(|file| was.contains(&file.path))
             .collect()
@@ -361,6 +366,10 @@ impl DetailPanel {
     pub(super) fn commit_button(&self, cx: &gpui_kit::App) -> (String, bool) {
         if self.worktree.job == Job::Committing {
             return ("Committing…".into(), false);
+        }
+        // git refuses to commit while a file is still in conflict.
+        if !self.worktree.conflicted().is_empty() {
+            return ("Resolve Conflicts to Commit".into(), false);
         }
         let typed = !self.summary.read(cx).text().trim().is_empty();
         if self.worktree.amend {

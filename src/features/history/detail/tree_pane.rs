@@ -87,7 +87,8 @@ fn aside(text: &'static str, color: Hsla) -> AnyElement {
 impl DetailPanel {
     /// While an operation has files in conflict or just settled, only those
     /// are listed. Otherwise the unstaged files, then the staged ones at the
-    /// bottom.
+    /// bottom. Files a stash left in conflict are listed the same way, with
+    /// the staged ones as settled.
     pub(super) fn render_worktree(
         &mut self,
         theme: &Theme,
@@ -99,12 +100,13 @@ impl DetailPanel {
         let resolved = tree.resolved();
         let conflicted = tree.conflicted();
         let in_operation = tree.in_operation();
+        let conflict_view = in_operation || !conflicted.is_empty();
 
         let mut lists: Vec<AnyElement> = Vec::new();
-        if in_operation {
+        if conflict_view {
             lists.push(self.conflicts(&conflicted, theme, cx));
         }
-        if in_operation && (!conflicted.is_empty() || !resolved.is_empty()) {
+        if conflict_view && (!conflicted.is_empty() || !resolved.is_empty()) {
             lists.push(self.resolved(&resolved, theme, cx));
         } else {
             // During an operation an empty unstaged list tells nothing.
@@ -153,18 +155,19 @@ impl DetailPanel {
             .px(px(12.0))
             .py(px(8.0))
             .bg(theme::ink(0.03));
-        if tree.in_operation() {
-            let noun = tree.operation.state.noun();
+        if tree.in_operation() || !tree.conflicted().is_empty() {
+            // A stash that did not apply cleanly leaves conflicts with no
+            // operation to name.
+            let noun = match tree.in_operation() {
+                true => format!("{} conflicts", tree.operation.state.noun()),
+                false => "Conflicts".to_owned(),
+            };
             let (icon, tone, text) = match tree.conflicted().is_empty() {
-                true => (
-                    icons::CHECK,
-                    theme.success,
-                    format!("{noun} conflicts resolved"),
-                ),
+                true => (icons::CHECK, theme.success, format!("{noun} resolved")),
                 false => (
                     icons::DANGER_TRIANGLE,
                     theme.warning,
-                    format!("{noun} conflicts detected"),
+                    format!("{noun} detected"),
                 ),
             };
             return top
