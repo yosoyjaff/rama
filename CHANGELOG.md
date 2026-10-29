@@ -4,6 +4,19 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.3.0] - 2026-10-28
+
+### Changed
+- A merge records a merge commit even when it could fast-forward. Settings >
+  History turns this off.
+- Checking out a commit or creating a branch carries uncommitted changes along,
+  as switching branches does; if they clash, they are kept in the stash.
+
+### Fixed
+- Files left in conflict by a stash that did not apply cleanly show in the
+  panel as Conflicted and Resolved, as during a merge, and Commit waits until
+  they are resolved.
+
 ## [0.2.0] - 2026-10-26
 
 ### Changed
