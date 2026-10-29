@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use crate::git::actions::{GitAction, RebaseOp, RebaseStep, ResetMode};
+use crate::git::actions::{GitAction, MergeMode, RebaseOp, RebaseStep, ResetMode};
 use crate::git::{RefBadge, RefKind};
 
 use crate::git::forge::{Hosted, Page};
@@ -112,6 +112,8 @@ pub struct Scene {
     /// The full message, to start a reword from.
     pub message: Option<String>,
     pub run: Option<LinearRun>,
+    /// Merges keep a merge commit even when they could fast-forward.
+    pub merge_commit: bool,
 }
 
 impl Scene {
@@ -140,6 +142,7 @@ pub enum Command {
     },
     Merge {
         from: String,
+        commit: bool,
     },
     Rebase {
         onto: String,
@@ -388,11 +391,15 @@ impl Command {
         match self.clone() {
             Command::FastForward { to } => git(GitAction::Merge {
                 reference: to,
-                ff_only: true,
+                mode: MergeMode::FfOnly,
             }),
-            Command::Merge { from } => git(GitAction::Merge {
+            Command::Merge { from, commit } => git(GitAction::Merge {
                 reference: from,
-                ff_only: false,
+                mode: if commit {
+                    MergeMode::NoFf
+                } else {
+                    MergeMode::FfPossible
+                },
             }),
             Command::Rebase { onto } => git(GitAction::Rebase { onto }),
             Command::Switch { branch } => git(GitAction::Checkout { name: branch }),
@@ -800,7 +807,10 @@ fn integrating(
     group.push(item(
         Item::new(
             format!("Merge {shown} into {here}"),
-            Command::Merge { from: what.clone() },
+            Command::Merge {
+                from: what.clone(),
+                commit: scene.merge_commit,
+            },
         )
         .confirm(
             format!("Merge {shown}?"),
@@ -1268,6 +1278,7 @@ mod tests {
             is_head: false,
             message: None,
             run: None,
+            merge_commit: true,
         }
     }
 
@@ -1315,7 +1326,7 @@ mod tests {
         let menu = menu_for(&scene(Aim::Commit));
         assert!(has(
             &menu,
-            |c| matches!(c, Command::Merge { from } if from == SHA)
+            |c| matches!(c, Command::Merge { from, .. } if from == SHA)
         ));
         assert!(!has(&menu, |c| matches!(c, Command::FastForward { .. })));
         assert!(!has(&menu, |c| matches!(

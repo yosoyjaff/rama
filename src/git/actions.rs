@@ -87,7 +87,7 @@ pub enum GitAction {
     /// Merge into the checked-out branch, or only fast-forward to it.
     Merge {
         reference: String,
-        ff_only: bool,
+        mode: MergeMode,
     },
     /// Finish the merge, rebase, cherry-pick or revert under way.
     ConflictContinue,
@@ -182,6 +182,15 @@ pub enum ResetMode {
     Soft,
     Mixed,
     Hard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeMode {
+    FfOnly,
+    /// Fast-forward, or merge when it cannot.
+    FfPossible,
+    /// A merge commit even when a fast-forward would do.
+    NoFf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -372,15 +381,17 @@ fn switch_carrying_changes(root: &Path, target: &str, argv: &[&str]) -> Result<O
 /// Merge with the uncommitted changes set aside. If the merge stops on
 /// conflicts they stay aside until it is finished or aborted, rather than
 /// being mixed into a tree full of conflict markers.
-fn merge(root: &Path, reference: &str, ff_only: bool) -> Result<GitActionOutcome> {
+fn merge(root: &Path, reference: &str, mode: MergeMode) -> Result<GitActionOutcome> {
     let ours = current_branch(root).unwrap_or_else(|| "HEAD".into());
     let stashed = autostash_push(
         root,
         &format!("Auto stash before merge of \"{ours}\" and \"{reference}\""),
     )?;
     let mut argv = vec!["merge", "--no-edit"];
-    if ff_only {
-        argv.push("--ff-only");
+    match mode {
+        MergeMode::FfOnly => argv.push("--ff-only"),
+        MergeMode::FfPossible => {}
+        MergeMode::NoFf => argv.push("--no-ff"),
     }
     argv.push(reference);
     match git(root, &argv) {
@@ -657,7 +668,7 @@ pub fn run(root: &Path, action: GitAction) -> Result<GitActionOutcome> {
             )?;
             said(format!("{name} annotated at {}", short(&sha)))
         }
-        Merge { reference, ff_only } => merge(root, &reference, ff_only),
+        Merge { reference, mode } => merge(root, &reference, mode),
         ConflictContinue => settled(conflicts::continue_operation(root)?, "finished"),
         ConflictSkip => settled(
             conflicts::rebase_skip(root)?,
@@ -1088,7 +1099,7 @@ mod tests {
             repo.path(),
             GitAction::Merge {
                 reference: "topic".into(),
-                ff_only: false,
+                mode: MergeMode::FfPossible,
             },
         )
         .unwrap();
@@ -1097,6 +1108,24 @@ mod tests {
         assert_eq!(head(&repo), before);
         run(repo.path(), GitAction::Redo).unwrap();
         assert_eq!(head(&repo), merged);
+    }
+
+    #[test]
+    fn no_ff_records_a_merge_commit_a_fast_forward_would_skip() {
+        let repo = TestRepo::new();
+        tracked(&repo, "a.txt", "a\n", "base");
+        repo.git(&["checkout", "-q", "-b", "topic"]);
+        tracked(&repo, "b.txt", "b\n", "topic");
+        repo.git(&["checkout", "-q", "main"]);
+        let merge = |mode| GitAction::Merge {
+            reference: "topic".into(),
+            mode,
+        };
+        run(repo.path(), merge(MergeMode::NoFf)).unwrap();
+        assert_eq!(repo.git(&["rev-list", "--count", "--merges", "HEAD"]), "1");
+        repo.git(&["reset", "-q", "--hard", "HEAD~1"]);
+        run(repo.path(), merge(MergeMode::FfPossible)).unwrap();
+        assert_eq!(repo.git(&["rev-list", "--count", "--merges", "HEAD"]), "0");
     }
 
     #[test]
