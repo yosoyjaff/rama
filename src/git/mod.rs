@@ -42,7 +42,9 @@ pub(crate) mod test_repo;
 pub mod types;
 pub mod watch;
 
-pub use actions::{GitAction, GitActionOutcome, PullMode, RebaseOp, RebaseStep, ResetMode};
+pub use actions::{
+    GitAction, GitActionOutcome, MergeMode, PullMode, RebaseOp, RebaseStep, ResetMode,
+};
 pub use diff::{
     FileDiffSide, FilePatch, capture_commit_diff, capture_file_diff, capture_working_diff,
 };

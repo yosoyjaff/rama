@@ -108,6 +108,7 @@ impl HistoryView {
                 .and_then(|remote| crate::git::forge::hosted(&remote.url)),
             remote: repo.tracked.as_ref().map(|remote| remote.name.clone()),
             message,
+            merge_commit: crate::settings::read(cx, |s| s.history.merge_commit),
         };
         self.popups.context.open(ContextMenu {
             at,

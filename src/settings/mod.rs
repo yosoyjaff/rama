@@ -299,6 +299,8 @@ pub struct History {
     pub badges: bool,
     pub panel: Panel,
     pub pull: Pull,
+    /// Merge with a merge commit even when a fast-forward would do.
+    pub merge_commit: bool,
 }
 
 impl Default for History {
@@ -309,6 +311,7 @@ impl Default for History {
             badges: true,
             panel: Panel::default(),
             pull: Pull::default(),
+            merge_commit: true,
         }
     }
 }

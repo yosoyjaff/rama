@@ -642,6 +642,18 @@ impl SettingsPage {
                 ),
                 theme,
             ),
+            self.row(
+                "Merge commit",
+                "Always record a merge commit, even when a fast-forward would do.",
+                self.toggle(
+                    "settings-merge-commit",
+                    settings.history.merge_commit,
+                    theme,
+                    cx,
+                    |settings| settings.history.merge_commit = !settings.history.merge_commit,
+                ),
+                theme,
+            ),
         ];
         if !kraken.is_empty() {
             // The tabs GitKraken had open, one click in — the same import
