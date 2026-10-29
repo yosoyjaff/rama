@@ -587,13 +587,17 @@ pub fn run(root: &Path, action: GitAction) -> Result<GitActionOutcome> {
             Ok(outcome)
         }
         CheckoutDetached { sha } => {
-            git(root, &["checkout", "--detach", &sha])?;
-            said(format!("HEAD detached at {}", short(&sha)))
+            let note = switch_carrying_changes(root, short(&sha), &["checkout", "--detach", &sha])?;
+            let mut outcome = said(format!("HEAD detached at {}", short(&sha)))?;
+            outcome.detail = note.or(outcome.detail);
+            Ok(outcome)
         }
         CheckoutNewBranch { name, start } => {
             check_branch_name(root, &name)?;
-            git(root, &["checkout", "-b", &name, &start])?;
-            landed(root, None)
+            let note = switch_carrying_changes(root, &name, &["checkout", "-b", &name, &start])?;
+            let mut outcome = landed(root, None)?;
+            outcome.detail = note.or(outcome.detail);
+            Ok(outcome)
         }
         CreateBranch { name, sha } => {
             check_branch_name(root, &name)?;
@@ -947,6 +951,89 @@ mod tests {
             repo.path(),
             GitAction::Checkout {
                 name: "other".into(),
+            },
+        )
+        .unwrap();
+        assert!(done.detail.unwrap().contains("kept in the stash"));
+        assert_eq!(repo.git(&["stash", "list"]).lines().count(), 1);
+    }
+
+    #[test]
+    fn changes_travel_with_a_detached_checkout() {
+        let repo = TestRepo::new();
+        tracked(&repo, "a.txt", "one\n", "a");
+        tracked(&repo, "b.txt", "b\n", "b");
+        repo.write("a.txt", "edited\n");
+        let at = head(&repo);
+        let done = run(repo.path(), GitAction::CheckoutDetached { sha: at.clone() }).unwrap();
+        assert!(done.detail.unwrap().contains("HEAD detached at"));
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("a.txt")).unwrap(),
+            "edited\n"
+        );
+        assert!(
+            repo.git(&["stash", "list"]).is_empty(),
+            "nothing left in the stash"
+        );
+    }
+
+    #[test]
+    fn changes_that_clash_stay_stashed_on_a_detached_checkout() {
+        let repo = TestRepo::new();
+        tracked(&repo, "a.txt", "base\n", "a");
+        repo.git(&["checkout", "-q", "-b", "other"]);
+        tracked(&repo, "a.txt", "other side\n", "other");
+        let other = head(&repo);
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("a.txt", "local edit\n");
+        let done = run(
+            repo.path(),
+            GitAction::CheckoutDetached { sha: other.clone() },
+        )
+        .unwrap();
+        assert!(done.detail.unwrap().contains("kept in the stash"));
+        assert_eq!(repo.git(&["stash", "list"]).lines().count(), 1);
+    }
+
+    #[test]
+    fn changes_travel_with_a_new_branch() {
+        let repo = TestRepo::new();
+        let base = tracked(&repo, "a.txt", "one\n", "a");
+        tracked(&repo, "b.txt", "b\n", "b");
+        repo.write("a.txt", "edited\n");
+        let done = run(
+            repo.path(),
+            GitAction::CheckoutNewBranch {
+                name: "topic".into(),
+                start: base.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(done.branch.as_deref(), Some("topic"));
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("a.txt")).unwrap(),
+            "edited\n"
+        );
+        assert!(
+            repo.git(&["stash", "list"]).is_empty(),
+            "nothing left in the stash"
+        );
+    }
+
+    #[test]
+    fn changes_that_clash_stay_stashed_on_a_new_branch() {
+        let repo = TestRepo::new();
+        tracked(&repo, "a.txt", "base\n", "a");
+        repo.git(&["checkout", "-q", "-b", "other"]);
+        tracked(&repo, "a.txt", "other side\n", "other");
+        let other = head(&repo);
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("a.txt", "local edit\n");
+        let done = run(
+            repo.path(),
+            GitAction::CheckoutNewBranch {
+                name: "topic".into(),
+                start: other.clone(),
             },
         )
         .unwrap();
