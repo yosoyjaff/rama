@@ -2,13 +2,16 @@
 <!--
   The Windows installer, built by packaging/package.sh with WiX v5:
 
+    wix extension add -g WixToolset.UI.wixext/5.0.2
     wix build packaging/windows/rama.wxs -arch x64 -d Version=0.2.0 \
-      -d BinDir=target/x86_64-pc-windows-msvc/release -o rama.msi
+      -d BinDir=target/x86_64-pc-windows-msvc/release \
+      -ext WixToolset.UI.wixext -o rama.msi
 
   UpgradeCode is Rama's identity to Windows Installer: it never changes, so a
   newer .msi replaces the installed one instead of installing beside it.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="Rama" Manufacturer="Rama" Version="$(var.Version)"
            UpgradeCode="30C44A55-BE4D-45C0-8DA3-3A97EAE126D0" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer version of Rama is already installed." />
@@ -17,16 +20,31 @@
     <Icon Id="RamaIcon" SourceFile="assets\app-icon\app.rama.ico" />
     <Property Id="ARPPRODUCTICON" Value="RamaIcon" />
 
+    <!-- Welcome, install folder, progress, and a Finish page that says it is
+         done. The licence page is skipped: MIT asks nothing of the user. -->
+    <UI>
+      <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog"
+               Value="InstallDirDlg" Order="2" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog"
+               Value="WelcomeDlg" Order="2" />
+    </UI>
+
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="Rama" />
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
 
     <Feature Id="Main">
       <Component Directory="INSTALLFOLDER">
         <File Id="RamaExe" Source="$(var.BinDir)\rama.exe" KeyPath="yes">
+          <!-- Plain shortcuts, not advertised ones: those depend on the
+               Windows Installer feature state and some shells skip them. -->
           <Shortcut Id="RamaStartMenu" Directory="ProgramMenuFolder" Name="Rama"
-                    WorkingDirectory="INSTALLFOLDER" Icon="RamaIcon" Advertise="yes" />
+                    WorkingDirectory="INSTALLFOLDER" Icon="RamaIcon" />
+          <Shortcut Id="RamaDesktop" Directory="DesktopFolder" Name="Rama"
+                    WorkingDirectory="INSTALLFOLDER" Icon="RamaIcon" />
         </File>
       </Component>
       <Component Directory="INSTALLFOLDER">

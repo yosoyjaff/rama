@@ -1,3 +1,7 @@
+// A release build on Windows is a GUI program: without this, Windows opens a
+// console beside the window and closing either one ends both.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 //! Bootstrap: initialize the layers, register the features, open the window.
 //!
 //! The module tree is the architecture:

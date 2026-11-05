@@ -436,12 +436,12 @@ fn github_token() -> Option<&'static str> {
 
 /// `gh auth token`: the token of the logged-in `gh` session, if there is one.
 fn gh_cli_token() -> Option<String> {
-    let output = std::process::Command::new("gh")
-        .args(["auth", "token", "--hostname", "github.com"])
+    let mut gh = std::process::Command::new("gh");
+    gh.args(["auth", "token", "--hostname", "github.com"])
         .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
+        .stderr(std::process::Stdio::null());
+    super::command::no_console_window(&mut gh);
+    let output = gh.output().ok()?;
     if !output.status.success() {
         return None;
     }
