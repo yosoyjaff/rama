@@ -5,6 +5,7 @@
 //! button and nothing to confirm: a preference is the user saying what they
 //! want, and it takes effect as they say it.
 
+use gpui_kit::component::button::Button;
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_kit::component::{Sizable as _, link::Link};
 use gpui_kit::{
@@ -12,6 +13,7 @@ use gpui_kit::{
     SharedString, Subscription, Window, div, img, prelude::*, px,
 };
 
+use crate::features::command_line::{self, CommandStatus, InstallCommandLine};
 use crate::recents;
 use crate::settings::{self, Accent, Mode, SavePolicy, Settings};
 use crate::ui::chrome::EDGE_INSET;
@@ -729,7 +731,7 @@ impl SettingsPage {
         )
     }
 
-    fn render_about(&mut self, theme: &Theme) -> AnyElement {
+    fn render_about(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let platform = format!("{} · {}", platform_name(), std::env::consts::ARCH);
         let repository = env!("CARGO_PKG_REPOSITORY");
         let identity = div()
@@ -760,8 +762,11 @@ impl SettingsPage {
                     .clone()
                     .map(|panel| self.fact_element("Updates", panel.into_any_element(), theme)),
             )
+            .chain([self.fact("Platform", platform.into(), theme)])
+            .chain(command_line::status(cx).map(|status| {
+                self.fact_element("Terminal command", command_control(status, theme), theme)
+            }))
             .chain([
-                self.fact("Platform", platform.into(), theme),
                 self.fact("License", env!("CARGO_PKG_LICENSE").into(), theme),
                 self.fact_element(
                     "Source code",
@@ -851,6 +856,40 @@ impl SettingsPage {
                     .children(rows),
             )
             .into_any_element()
+    }
+}
+
+/// About's Terminal command row: where `rama` stands, and the button that
+/// installs it when it is missing.
+fn command_control(status: CommandStatus, theme: &Theme) -> AnyElement {
+    let note = |text: SharedString| {
+        div()
+            .min_w_0()
+            .truncate()
+            .text_color(theme.text_muted)
+            .child(text)
+    };
+    let install = |label: &'static str| {
+        Button::new("settings-install-command")
+            .small()
+            .label(label)
+            .on_click(|_, _, cx| cx.dispatch_action(&InstallCommandLine))
+    };
+    match status {
+        CommandStatus::Ready => {
+            note(format!("rama — {}", command_line::LINK).into()).into_any_element()
+        }
+        CommandStatus::Installing => note("Installing…".into()).into_any_element(),
+        CommandStatus::Unavailable(reason) => note(reason).into_any_element(),
+        CommandStatus::Missing => install("Install").into_any_element(),
+        CommandStatus::Failed(error) => div()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(note(error))
+            .child(install("Try again"))
+            .into_any_element(),
     }
 }
 
@@ -964,7 +1003,7 @@ impl Render for SettingsPage {
             Section::Appearance => self.render_appearance(&theme, cx),
             Section::History => self.render_history(&theme, cx),
             Section::Diff => self.render_diff(&theme, cx),
-            Section::About => self.render_about(&theme),
+            Section::About => self.render_about(&theme, cx),
         };
         div()
             .track_focus(&self.focus_handle)

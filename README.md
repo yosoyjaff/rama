@@ -85,11 +85,9 @@ opens there as a new tab. `rama --help` lists the options.
 
 The `.deb`, `.rpm` and the Windows `.msi` put `rama` on your `PATH` (open a
 new terminal after installing); `install.sh` puts it in `~/.local/bin`, which
-most distributions have on it. On macOS, link it once:
-
-```bash
-sudo ln -sf /Applications/Rama.app/Contents/MacOS/rama /usr/local/bin/rama
-```
+most distributions have on it. On macOS, the first launch installs it (macOS
+may ask for your password); if that was cancelled, use **Settings → About →
+Terminal command**.
 
 Rama checks for new versions a few seconds after it starts and offers to
 install them in place; you can also check from **Settings → About**.
