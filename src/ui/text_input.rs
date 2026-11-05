@@ -394,3 +394,59 @@ mod tests {
         probe(FieldKind::Code, true, cx);
     }
 }
+
+#[cfg(test)]
+mod clipboard_tests {
+    use super::*;
+
+    struct Host(Entity<TextInput>);
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(self.0.clone())
+        }
+    }
+
+    /// The merge editor's box under `Root`, as the window mounts it: the
+    /// platform shortcuts copy, and paste, through the clipboard.
+    #[gpui_kit::test]
+    fn the_code_editor_copies_and_pastes(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::ui::theme::init(cx);
+        });
+        let host = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let slot = host.clone();
+        let (_root, cx) = cx.add_window_view(|window, cx| {
+            let input = cx.new(|cx| {
+                let mut input = TextInput::code_editor("Edit the resolution", window, cx);
+                input.set_text("hello", window, cx);
+                input
+            });
+            let view = cx.new(|_| Host(input));
+            *slot.borrow_mut() = Some(view.clone());
+            gpui_kit::component::Root::new(view, window, cx)
+        });
+        let input = host
+            .borrow()
+            .clone()
+            .expect("host")
+            .read_with(cx, |host, _| host.0.clone());
+        cx.update(|window, cx| {
+            let handle = input.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        });
+        cx.run_until_parked();
+
+        cx.simulate_keystrokes("secondary-a secondary-c");
+        let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+        assert_eq!(copied.as_deref(), Some("hello"));
+
+        cx.simulate_keystrokes("right secondary-v");
+        cx.run_until_parked();
+        assert_eq!(
+            input.read_with(cx, |input, _| input.text().clone()),
+            "hellohello"
+        );
+    }
+}

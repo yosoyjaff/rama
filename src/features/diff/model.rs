@@ -673,6 +673,86 @@ pub fn ruler_marks(rows: &[DiffRow], files: &[FileDiff]) -> Vec<RulerMark> {
     marks
 }
 
+// ── Copying ─────────────────────────────────────────────────────────────────
+
+/// Which lines of a row a selection reads: a unified row has one, a split
+/// row one per side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pick {
+    Unified,
+    Old,
+    New,
+}
+
+/// The code of rows `from..=to` (either order) as `pick` reads them, one
+/// line each: the text alone, without sign or number. Rows that hold no code
+/// on that side — bands, notices, a split row's empty half — add nothing.
+pub fn selected_text(
+    rows: &[DiffRow],
+    files: &[FileDiff],
+    from: usize,
+    to: usize,
+    pick: Pick,
+) -> String {
+    let (start, end) = (from.min(to), from.max(to));
+    let line = |file: u32, hunk: u32, line: Option<u32>| -> Option<&DiffLine> {
+        let hunk = files.get(file as usize)?.hunks.get(hunk as usize)?;
+        hunk.lines.get(line? as usize)
+    };
+    rows.get(start..=end.min(rows.len().saturating_sub(1)))
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|row| match (*row, pick) {
+            (
+                DiffRow::Line {
+                    file,
+                    hunk,
+                    line: l,
+                    ..
+                },
+                _,
+            ) => line(file, hunk, Some(l)),
+            (
+                DiffRow::SplitLine {
+                    file, hunk, left, ..
+                },
+                Pick::Old,
+            ) => line(file, hunk, left),
+            (
+                DiffRow::SplitLine {
+                    file, hunk, right, ..
+                },
+                Pick::New | Pick::Unified,
+            ) => line(file, hunk, right),
+            _ => None,
+        })
+        .filter(|line| line.kind != LineKind::Meta)
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A hunk as git wrote it: its `@@` line, then every line with its sign.
+pub fn hunk_text(hunk: &Hunk) -> String {
+    let lines = hunk.lines.iter().map(|line| {
+        let sign = match line.kind {
+            LineKind::Context => ' ',
+            LineKind::Add => '+',
+            LineKind::Del => '-',
+            LineKind::Meta => '\\',
+        };
+        match line.kind {
+            LineKind::Meta => format!("{sign} {}", line.text),
+            _ => format!("{sign}{}", line.text),
+        }
+    });
+    std::iter::once(hunk.header.clone())
+        .filter(|header| !header.is_empty())
+        .chain(lines)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 // ── Conflicts ───────────────────────────────────────────────────────────────
 
 /// The conflict, side and line of that side a patch line stands for.
@@ -1022,6 +1102,54 @@ new file mode 100644
                 (Some(4), Some(4)),
                 (None, Some(5)),
             ]
+        );
+    }
+
+    #[test]
+    fn a_unified_selection_copies_the_code_of_its_lines() {
+        let files = read_patch(PATCH);
+        let (rows, _) = layout_rows(&files, DiffMode::Unified, |_| false);
+        let first = rows
+            .iter()
+            .position(|row| matches!(row, DiffRow::Line { .. }))
+            .unwrap();
+        // Dragged upwards: the order of the ends does not matter.
+        let text = selected_text(&rows, &files, first + 2, first, Pick::Unified);
+        assert_eq!(text, "first\nbefore\nafter");
+    }
+
+    #[test]
+    fn a_split_selection_copies_one_side() {
+        let files = read_patch(PATCH);
+        let (rows, _) = layout_rows(&files, DiffMode::Split, |_| false);
+        let last = rows.len() - 1;
+        assert_eq!(
+            selected_text(&rows, &files, 0, last, Pick::Old),
+            "first\nbefore\nlast"
+        );
+        assert_eq!(
+            selected_text(&rows, &files, 0, last, Pick::New),
+            "first\nafter\nmore\nlast\nalpha\nbeta"
+        );
+    }
+
+    #[test]
+    fn a_selection_past_the_end_stops_at_the_last_row() {
+        let files = read_patch(PATCH);
+        let (rows, _) = layout_rows(&files, DiffMode::Unified, |_| false);
+        let all = selected_text(&rows, &files, 0, rows.len() - 1, Pick::Unified);
+        assert_eq!(
+            selected_text(&rows, &files, 0, rows.len() + 10, Pick::Unified),
+            all
+        );
+    }
+
+    #[test]
+    fn a_hunk_copies_as_a_patch() {
+        let files = read_patch(PATCH);
+        assert_eq!(
+            hunk_text(&files[0].hunks[0]),
+            "@@ -7,4 +7,5 @@ fn main()\n first\n-before\n+after\n+more\n last"
         );
     }
 }

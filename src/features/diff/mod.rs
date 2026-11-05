@@ -22,3 +22,19 @@ pub mod sideways;
 pub mod view;
 
 pub use view::DiffView;
+
+/// The key context the diff viewer declares: its bindings only exist where a
+/// patch is on screen.
+pub const KEY_CONTEXT: &str = "DiffView";
+
+gpui_kit::actions!(
+    diff,
+    [
+        /// Copy the selected lines' code. Bound to Copy; also in the line menu.
+        CopySelection,
+        /// Copy the hunk under the line menu, as a patch.
+        CopyHunk,
+        /// Copy the file's path.
+        CopyPath,
+    ]
+);

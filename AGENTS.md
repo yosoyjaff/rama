@@ -68,8 +68,9 @@ and `gpui-component-0.6.*/`.
 - GPUI Kit's `TitleBar` forces its own window buttons, so `src/ui/title_bar.rs`
   is hand-built. Controls on the drag strip need `occlude()` and must stop
   `mouse_down`.
-- `KeyBinding::new` panics at startup on a bad keystroke. Use `secondary` for
-  ⌘/Ctrl, and run the app after touching shortcuts.
+- `KeyBinding::new` panics at startup on a bad keystroke, `secondary-`
+  included (only `KeyBinding::load` resolves it). Bind `cmd-`/`ctrl-` behind
+  `cfg(target_os)`, and run the app after touching shortcuts.
 - An empty flex child still takes the row's `gap`: don't emit empty slots.
 - The repo watcher must ignore `EventKind::Access`, or every git read triggers
   another reload (`src/git/watch.rs`).
