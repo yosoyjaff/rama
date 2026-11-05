@@ -21,6 +21,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Empty, Entity, EventEmitter, FocusHandle, Focusable,
@@ -31,8 +32,8 @@ use gpui_kit::{
 use super::highlight::{HighlightSpan, HighlightedDocument, highlight_document};
 use super::metrics::RULER;
 use super::model::{
-    ConflictLine, DiffMode, DiffRow, FileDiff, FileStatus, MarkTone, hunk_spans, layout_rows,
-    read_patch, ruler_marks,
+    ConflictLine, DiffMode, DiffRow, FileDiff, FileStatus, MarkTone, Pick, hunk_spans, hunk_text,
+    layout_rows, read_patch, ruler_marks, selected_text,
 };
 use super::preview::{Preview, PreviewKind};
 use super::render::{
@@ -40,6 +41,7 @@ use super::render::{
     split_line_cell_styled, split_missing_side, split_row,
 };
 use super::sideways::{Fit, Half, Sideways};
+use super::{CopyHunk, CopyPath, CopySelection, KEY_CONTEXT};
 use crate::git::FileDiffSide;
 use crate::git::blame::BlameResult;
 use crate::git::conflict_file::{self, ConflictSegment, ConflictTakes, Side};
@@ -65,6 +67,9 @@ const HORIZONTAL_BAR_HEIGHT: f32 = 10.0;
 
 /// The small square controls of the second strip.
 const TOOL_SIZE: f32 = 20.0;
+
+/// How strongly selected lines are washed in the accent colour.
+const SELECTION_WASH: f32 = 0.18;
 
 /// What the viewer is reading: always one file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,7 +305,28 @@ pub struct DiffView {
     loading: bool,
     error: Option<SharedString>,
     task: Option<Task<()>>,
+    /// The lines picked for Copy, as rows of the patch list.
+    selection: Option<LineSelection>,
+    /// A press on a line is being dragged over others.
+    selecting: bool,
+    /// The hunk under the last right-click, which Copy Hunk copies.
+    menu_hunk: Option<(u32, u32)>,
     focus_handle: FocusHandle,
+}
+
+/// A run of patch rows picked with the mouse: pressed at `anchor`, extended
+/// to `head`, on one side of a split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LineSelection {
+    anchor: usize,
+    head: usize,
+    pick: Pick,
+}
+
+impl LineSelection {
+    fn contains(&self, ix: usize, pick: Pick) -> bool {
+        self.pick == pick && (self.anchor.min(self.head)..=self.anchor.max(self.head)).contains(&ix)
+    }
 }
 
 impl EventEmitter<DiffViewEvent> for DiffView {}
@@ -339,6 +365,9 @@ impl DiffView {
             loading: false,
             error: None,
             task: None,
+            selection: None,
+            selecting: false,
+            menu_hunk: None,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -1050,11 +1079,18 @@ impl DiffView {
             .and_then(|parsed| parsed.sideways.first())
             .filter(|_| !settings.diff.wrap)
             .map(|state| (state.left.clone(), state.right.clone()));
+        let has_hunk = !self.is_conflict();
+        let focus = self.focus_handle.clone();
         div()
+            .id("diff-code")
             .flex_1()
             .min_w_0()
             .h_full()
             .relative()
+            .on_mouse_up(
+                gpui_kit::MouseButton::Left,
+                cx.listener(|view, _, _, _| view.selecting = false),
+            )
             .on_drag_move(
                 cx.listener(|_, event: &gpui_kit::DragMoveEvent<SplitterDrag>, _, cx| {
                     if event.drag(cx).0.as_ref() != SPLIT_SPLITTER {
@@ -1121,6 +1157,14 @@ impl DiffView {
                             cx.refresh_windows();
                         })),
                 )
+            })
+            // Right-click on a line: the line picks itself first (see
+            // `on_line_menu`), then this menu acts on it.
+            .context_menu(move |menu, _, _| {
+                menu.action_context(focus.clone())
+                    .menu("Copy", Box::new(CopySelection))
+                    .when(has_hunk, |menu| menu.menu("Copy Hunk", Box::new(CopyHunk)))
+                    .menu("Copy Path", Box::new(CopyPath))
             })
             .into_any_element()
     }
@@ -1230,6 +1274,9 @@ impl DiffView {
         };
         let (rows, _) = layout_rows(&parsed.files, mode, |_| false);
         self.rows = rows;
+        // Row numbers point somewhere else now.
+        self.selection = None;
+        self.selecting = false;
         reset_list(&self.list, self.rows.len(), super::metrics::LINE_HEIGHT);
         cx.notify();
     }
@@ -1351,6 +1398,144 @@ impl DiffView {
             .into_any_element()
     }
 
+    /// A press on line row `ix`: a new selection, or with Shift the current
+    /// one stretched to it.
+    fn on_line_down(
+        &mut self,
+        ix: usize,
+        pick: Pick,
+        event: &gpui_kit::MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor = match self.selection {
+            Some(selection) if event.modifiers.shift && selection.pick == pick => selection.anchor,
+            _ => ix,
+        };
+        self.selection = Some(LineSelection {
+            anchor,
+            head: ix,
+            pick,
+        });
+        self.selecting = true;
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    /// The pointer over line row `ix` while a press drags.
+    fn on_line_drag(
+        &mut self,
+        ix: usize,
+        event: &gpui_kit::MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if event.pressed_button != Some(gpui_kit::MouseButton::Left) {
+            self.selecting = false;
+            return;
+        }
+        if !self.selecting {
+            return;
+        }
+        if let Some(selection) = self.selection.as_mut()
+            && selection.head != ix
+        {
+            selection.head = ix;
+            cx.notify();
+        }
+    }
+
+    /// A right-click on line row `ix`: the menu acts on the selection if the
+    /// line is in it, on the line alone if not.
+    fn on_line_menu(&mut self, ix: usize, pick: Pick, cx: &mut Context<Self>) {
+        if !self.selection.is_some_and(|s| s.contains(ix, pick)) {
+            self.selection = Some(LineSelection {
+                anchor: ix,
+                head: ix,
+                pick,
+            });
+        }
+        self.menu_hunk = match self.rows.get(ix) {
+            Some(DiffRow::Line { file, hunk, .. } | DiffRow::SplitLine { file, hunk, .. }) => {
+                Some((*file, *hunk))
+            }
+            _ => None,
+        };
+        cx.notify();
+    }
+
+    fn copy_selection(&mut self, _: &CopySelection, _: &mut Window, cx: &mut Context<Self>) {
+        let (Some(selection), Some(parsed)) = (self.selection, self.parsed.as_ref()) else {
+            return;
+        };
+        let text = selected_text(
+            &self.rows,
+            &parsed.files,
+            selection.anchor,
+            selection.head,
+            selection.pick,
+        );
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text));
+    }
+
+    fn copy_hunk(&mut self, _: &CopyHunk, _: &mut Window, cx: &mut Context<Self>) {
+        let Some((file, hunk)) = self.menu_hunk else {
+            return;
+        };
+        let Some(hunk) = self
+            .parsed
+            .as_ref()
+            .and_then(|parsed| parsed.files.get(file as usize))
+            .and_then(|file| file.hunks.get(hunk as usize))
+        else {
+            return;
+        };
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(hunk_text(hunk)));
+    }
+
+    fn copy_path(&mut self, _: &CopyPath, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(source) = &self.source {
+            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                source.path().to_owned(),
+            ));
+        }
+    }
+
+    /// A line row made selectable: press, drag and right-click pick it, and
+    /// a picked line is washed in the selection colour.
+    fn selectable(
+        &self,
+        ix: usize,
+        pick: Pick,
+        cell: AnyElement,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::Div {
+        let picked = self.selection.is_some_and(|s| s.contains(ix, pick));
+        div()
+            .relative()
+            .flex()
+            .child(cell)
+            .when(picked, |row| {
+                row.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(theme.accent.opacity(SELECTION_WASH)),
+                )
+            })
+            .on_mouse_down(
+                gpui_kit::MouseButton::Left,
+                cx.listener(move |view, event, window, cx| {
+                    view.on_line_down(ix, pick, event, window, cx)
+                }),
+            )
+            .on_mouse_move(cx.listener(move |view, event, _, cx| view.on_line_drag(ix, event, cx)))
+            .on_mouse_down(
+                gpui_kit::MouseButton::Right,
+                cx.listener(move |view, _, _, cx| view.on_line_menu(ix, pick, cx)),
+            )
+    }
+
     fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.build_row(ix, window, cx)
             .unwrap_or_else(|| Empty.into_any_element())
@@ -1393,14 +1578,12 @@ impl DiffView {
                     .and_then(|file| file.get(hunk as usize))
                     .and_then(|hunk| hunk.get(line_ix as usize))
                     .map_or(&[][..], Vec::as_slice);
-                Some(diff_line_row(
-                    line,
-                    spans,
-                    &theme,
-                    file.gutter(),
-                    fit,
-                    Some(track),
-                ))
+                let row = diff_line_row(line, spans, &theme, file.gutter(), fit, Some(track));
+                Some(
+                    self.selectable(ix, Pick::Unified, row, &theme, cx)
+                        .w_full()
+                        .into_any_element(),
+                )
             }
             DiffRow::SplitLine {
                 hunk, left, right, ..
@@ -1453,7 +1636,11 @@ impl DiffView {
             Half::Right => (line.new_no, "right"),
         };
         let look = at.and_then(|at| self.conflict_look(at, theme, cx));
-        split_line_cell_styled(
+        let pick = match half {
+            Half::Left => Pick::Old,
+            Half::Right => Pick::New,
+        };
+        let cell = split_line_cell_styled(
             line,
             number,
             super::highlight::runs_for_line(
@@ -1469,7 +1656,12 @@ impl DiffView {
             Some(sideways.track(ix, half, cell)),
             look,
         )
-        .into_any_element()
+        .into_any_element();
+        self.selectable(ix, pick, cell, theme, cx)
+            .flex_1()
+            .min_w_0()
+            .self_stretch()
+            .into_any_element()
     }
 
     /// How a conflict's line looks: its side's colour, and its take box in
@@ -1487,6 +1679,9 @@ impl DiffView {
             taken,
             theme,
         )
+        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+            cx.stop_propagation()
+        })
         .on_click(cx.listener(move |view, _, _, cx| view.conflict_toggle(line, cx)))
         .tooltip(tooltip(if taken {
             "Don't take this line"
@@ -2466,6 +2661,10 @@ impl Render for DiffView {
 
         div()
             .track_focus(&self.focus_handle)
+            .key_context(KEY_CONTEXT)
+            .on_action(cx.listener(Self::copy_selection))
+            .on_action(cx.listener(Self::copy_hunk))
+            .on_action(cx.listener(Self::copy_path))
             .size_full()
             .flex()
             .flex_col()
@@ -2590,5 +2789,114 @@ mod tests {
         let full = 50_000.0 * super::super::metrics::LINE_HEIGHT;
         let extent = extent_after_resize(true, cx);
         assert!(extent > px(full - 1_000.0), "{extent:?}");
+    }
+
+    /// A working-tree change on screen in the unified layout, inside `Root`
+    /// as the window mounts it.
+    fn open_patch(
+        cx: &mut gpui_kit::TestAppContext,
+    ) -> (
+        crate::git::test_repo::TestRepo,
+        Entity<DiffView>,
+        &mut gpui_kit::VisualTestContext,
+    ) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::ui::theme::init(cx);
+            crate::settings::init(cx);
+            crate::keymap::init(cx);
+        });
+        let repo = crate::git::test_repo::TestRepo::new();
+        repo.write("a.txt", "one\ntwo\n");
+        repo.git(&["add", "."]);
+        repo.commit("base");
+        repo.write("a.txt", "one\nTWO\nthree\n");
+        let slot = Rc::new(std::cell::RefCell::new(None));
+        let view_slot = slot.clone();
+        let (_root, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(DiffView::new);
+            *view_slot.borrow_mut() = Some(view.clone());
+            gpui_kit::component::Root::new(view, window, cx)
+        });
+        let view = slot.borrow().clone().expect("view");
+        let path = repo.path().to_string_lossy().into_owned();
+        view.update(cx, |view, cx| {
+            view.layout = DiffLayout::Hunk;
+            view.show(
+                DiffSource::WorkingTreeFile {
+                    repo: path,
+                    path: "a.txt".into(),
+                    staged: false,
+                },
+                cx,
+            );
+        });
+        for _ in 0..50 {
+            cx.run_until_parked();
+            if view.read_with(cx, |view, _| !view.loading && !view.rows.is_empty()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        cx.update(|window, cx| {
+            let focus = view.read(cx).focus_handle.clone();
+            window.focus(&focus, cx);
+            _ = window.draw(cx);
+        });
+        (repo, view, cx)
+    }
+
+    fn line_rows(view: &DiffView) -> Vec<usize> {
+        (0..view.rows.len())
+            .filter(|&ix| matches!(view.rows[ix], DiffRow::Line { .. }))
+            .collect()
+    }
+
+    /// Press a line, Shift-press another, then the platform Copy: the
+    /// lines between them reach the clipboard as code.
+    #[gpui_kit::test]
+    fn copy_takes_the_selected_lines(cx: &mut gpui_kit::TestAppContext) {
+        let (_repo, view, cx) = open_patch(cx);
+        let lines = view.read_with(cx, |view, _| line_rows(view));
+        assert!(lines.len() >= 3, "{lines:?}");
+        let press = |shift: bool| gpui_kit::MouseDownEvent {
+            modifiers: gpui_kit::Modifiers {
+                shift,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.on_line_down(lines[1], Pick::Unified, &press(false), window, cx);
+                view.on_line_down(lines[2], Pick::Unified, &press(true), window, cx);
+            })
+        });
+        cx.simulate_keystrokes("secondary-c");
+        let copied = cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+        assert_eq!(copied.as_deref(), Some("two\nTWO"));
+    }
+
+    /// Right-click outside the selection picks that line alone; Copy Hunk
+    /// and Copy Path copy what they say.
+    #[gpui_kit::test]
+    fn the_line_menu_copies_hunk_and_path(cx: &mut gpui_kit::TestAppContext) {
+        let (_repo, view, cx) = open_patch(cx);
+        let lines = view.read_with(cx, |view, _| line_rows(view));
+        view.update(cx, |view, cx| {
+            view.on_line_menu(lines[0], Pick::Unified, cx)
+        });
+        let read = |cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+        };
+        cx.dispatch_action(CopySelection);
+        assert_eq!(read(cx).as_deref(), Some("one"));
+        cx.dispatch_action(CopyHunk);
+        assert_eq!(
+            read(cx).as_deref(),
+            Some("@@ -1,2 +1,3 @@\n one\n-two\n+TWO\n+three")
+        );
+        cx.dispatch_action(CopyPath);
+        assert_eq!(read(cx).as_deref(), Some("a.txt"));
     }
 }
