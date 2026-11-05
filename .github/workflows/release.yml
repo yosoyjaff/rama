@@ -210,6 +210,7 @@ jobs:
         run: |
           dotnet tool install --global wix --version 5.0.2
           echo "$USERPROFILE/.dotnet/tools" >> "$GITHUB_PATH"
+          "$USERPROFILE/.dotnet/tools/wix" extension add -g WixToolset.UI.wixext/5.0.2
 
       - name: Package
         id: package

@@ -249,11 +249,16 @@ fn verify(bytes: &[u8], artifact: &ReleaseArtifact) -> Result<()> {
 /// Unpack with the system's `tar`: present on macOS and Linux, and on Windows
 /// 10 and later, where it also reads `.zip`.
 fn unpack(archive: &Path, into: &Path) -> Result<()> {
-    let status = Command::new("tar")
-        .arg("-xf")
-        .arg(archive)
-        .arg("-C")
-        .arg(into)
+    let mut tar = Command::new("tar");
+    tar.arg("-xf").arg(archive).arg("-C").arg(into);
+    // A GUI process's console child would flash a black window.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        tar.creation_flags(CREATE_NO_WINDOW);
+    }
+    let status = tar
         .status()
         .context("cannot run tar to unpack the update")?;
     if !status.success() {

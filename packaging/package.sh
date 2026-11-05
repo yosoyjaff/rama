@@ -62,7 +62,7 @@ case "$target" in
     mkdir -p staging/msi
     wix build packaging/windows/rama.wxs -arch "$arch" \
       -d Version="${version%%-*}" -d BinDir="$built" \
-      -o "staging/msi/${binary}.msi"
+      -ext WixToolset.UI.wixext -o "staging/msi/${binary}.msi"
     # Built aside: wix also writes a .wixpdb, which is not shipped.
     mv "staging/msi/${binary}.msi" "dist/${name}.msi"
     checksum "dist/${name}.msi"
