@@ -4,6 +4,23 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.4.0] - 2026-11-05
+
+### Added
+- `rama .` opens the repository you are in from a terminal, like `code .`.
+  Any path inside a checkout works; if Rama is already open, the repository
+  opens there as a new tab. The Windows installer puts `rama` on the `PATH`.
+- In the diff, click a line to select it; Shift-click or drag to select more,
+  and Ctrl+C (⌘C) copies their code. Right-click a line to copy it, its hunk
+  or the file's path.
+
+### Fixed
+- Windows: Rama no longer opens a console window beside its own, and closing
+  one no longer closes the other.
+- Windows: the installer shows its steps and a Finish page, and creates
+  shortcuts on the desktop and in the Start menu. Run the new `.msi` to get
+  them; it replaces the installed version.
+
 ## [0.3.0] - 2026-10-28
 
 ### Changed
