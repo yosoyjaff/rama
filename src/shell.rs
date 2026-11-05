@@ -38,6 +38,13 @@ impl Shell {
         }
     }
 
+    /// Open a repository as a tab, or bring its tab to the front.
+    pub fn open_repository(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.workspace.update(cx, |workspace, cx| {
+            workspace.open_repository(path, window, cx)
+        });
+    }
+
     /// The top band: the open projects, and the platform's own window
     /// controls.
     ///

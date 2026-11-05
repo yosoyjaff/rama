@@ -26,7 +26,8 @@ archive is what the updater installs; the rest are installers:
 - **`.AppImage`**: an AppDir handed to `appimagetool`.
 - **`.dmg`**: `hdiutil`, with `Rama.app` beside a link to `/Applications`.
 - **`.msi`**: WiX v5 from `packaging/windows/rama.wxs`, installed per machine
-  with a Start menu shortcut. Its `UpgradeCode` must never change.
+  with a Start menu shortcut, and its folder on the system `PATH` so `rama .`
+  works from a terminal (`src/launch.rs`). Its `UpgradeCode` must never change.
 
 Linux builds on Ubuntu 22.04, so the packages run on glibc 2.35 or newer.
 

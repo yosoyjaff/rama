@@ -27,6 +27,12 @@ pub fn avatars_dir() -> PathBuf {
     config_dir().join("avatars")
 }
 
+/// Where a running Rama leaves the address a second `rama <path>` hands
+/// its path to (see `crate::launch`).
+pub fn instance_path() -> PathBuf {
+    config_dir().join("instance")
+}
+
 fn config_dir() -> PathBuf {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     if cfg!(target_os = "windows") {

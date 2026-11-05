@@ -20,6 +20,7 @@ mod assets;
 mod features;
 mod git;
 mod keymap;
+mod launch;
 mod recents;
 mod settings;
 mod shell;
@@ -53,6 +54,10 @@ const MIN_WIDTH: f32 = 720.;
 const MIN_HEIGHT: f32 = 480.;
 
 fn main() {
+    // `rama <path>`: handed to a running Rama, or opened by this one.
+    let Some(launch) = launch::start() else {
+        return;
+    };
     let app = gpui_kit::application().with_assets(crate::assets::Assets);
 
     app.run(move |cx| {
@@ -63,15 +68,31 @@ fn main() {
 
         let options = window_options(cx);
         cx.spawn(async move |cx| {
-            cx.open_window(options, |window, cx| {
-                let shell = cx.new(|cx| Shell::new(window, cx));
-                // Root is required as the window's first level: it mounts the
-                // dialog, sheet and notification layers, and owns modal focus
-                // restoration and the window's rem size. On Linux it also
-                // draws the window's frame (see `ui::window_frame`).
-                cx.new(|cx| Root::new(shell, window, cx))
-            })
-            .expect("failed to open the main window");
+            let window = cx
+                .open_window(options, |window, cx| {
+                    let shell = cx.new(|cx| Shell::new(window, cx));
+                    if let Some(repo) = launch.repo {
+                        shell.update(cx, |shell, cx| shell.open_repository(repo, window, cx));
+                    }
+                    // Root is required as the window's first level: it mounts the
+                    // dialog, sheet and notification layers, and owns modal focus
+                    // restoration and the window's rem size. On Linux it also
+                    // draws the window's frame (see `ui::window_frame`).
+                    cx.new(|cx| Root::new(shell, window, cx))
+                })
+                .expect("failed to open the main window");
+            // A later `rama <path>` opens its repository here, in front.
+            cx.update(|cx| {
+                launch::serve(cx, move |repo, cx| {
+                    let _ = window.update(cx, |root, window, cx| {
+                        if let Ok(shell) = root.view().clone().downcast::<Shell>() {
+                            shell.update(cx, |shell, cx| shell.open_repository(repo, window, cx));
+                        }
+                        window.activate_window();
+                    });
+                    cx.activate(true);
+                })
+            });
             // The window is up: only now does the network get asked whether
             // a newer release exists, off the main thread.
             cx.update(updater::check_after_launch);
