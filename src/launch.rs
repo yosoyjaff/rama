@@ -28,6 +28,7 @@ const HANDOFF_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Set on the copy of this process that stays behind as the app, so it does
 /// not detach again.
+#[cfg(unix)]
 const DETACHED_ENV: &str = "RAMA_DETACHED";
 
 /// What the command line asked for.
