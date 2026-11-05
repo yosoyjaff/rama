@@ -19,7 +19,7 @@ use std::time::Duration;
 use gpui_kit::{App, Global, Task};
 use serde::{Deserialize, Serialize};
 
-pub use file::{avatars_dir, settings_path};
+pub use file::{avatars_dir, instance_path, settings_path};
 
 /// How long a dragged value must rest before it is written.
 const DEBOUNCE: Duration = Duration::from_millis(400);

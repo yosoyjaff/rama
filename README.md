@@ -77,6 +77,20 @@ named `rama-<version>-<arch>-<os>`; `x86_64` is Intel/AMD and `aarch64` is Arm
 | **Fedora, openSUSE** | `.rpm` | `sudo dnf install ./rama-<version>-<arch>-linux.rpm` |
 | **Any Linux** | `.AppImage` | `chmod +x` it and run it. Or take the `.tar.gz` and run `./install.sh` (installs to `~/.local`). |
 
+### From a terminal
+
+`rama .` opens the repository you are in, like `code .` does for VS Code;
+any path inside a checkout works. If Rama is already open, the repository
+opens there as a new tab. `rama --help` lists the options.
+
+The `.deb`, `.rpm` and the Windows `.msi` put `rama` on your `PATH` (open a
+new terminal after installing); `install.sh` puts it in `~/.local/bin`, which
+most distributions have on it. On macOS, link it once:
+
+```bash
+sudo ln -sf /Applications/Rama.app/Contents/MacOS/rama /usr/local/bin/rama
+```
+
 Rama checks for new versions a few seconds after it starts and offers to
 install them in place; you can also check from **Settings → About**.
 

@@ -26,8 +26,9 @@ archive is what the updater installs; the rest are installers:
 - **`.AppImage`**: an AppDir handed to `appimagetool`.
 - **`.dmg`**: `hdiutil`, with `Rama.app` beside a link to `/Applications`.
 - **`.msi`**: WiX v5 from `packaging/windows/rama.wxs`, installed per machine
-  with the installer wizard (WixUI, `WixToolset.UI.wixext`) and Start menu and
-  desktop shortcuts. Its `UpgradeCode` must never change.
+  with the installer wizard (WixUI, `WixToolset.UI.wixext`), Start menu and
+  desktop shortcuts, and its folder on the system `PATH` so `rama .` works
+  from a terminal (`src/launch.rs`). Its `UpgradeCode` must never change.
 
 Linux builds on Ubuntu 22.04, so the packages run on glibc 2.35 or newer.
 

@@ -53,6 +53,14 @@
       <Component Directory="INSTALLFOLDER">
         <File Id="ThirdPartyLicenses" Source="THIRD_PARTY_LICENSES.txt" KeyPath="yes" />
       </Component>
+      <!-- `rama .` from any terminal: the install folder joins the system
+           PATH, and leaves it on uninstall. -->
+      <Component Id="PathEntry" Directory="INSTALLFOLDER">
+        <RegistryValue Root="HKLM" Key="Software\Rama" Name="OnPath" Type="integer"
+                       Value="1" KeyPath="yes" />
+        <Environment Id="RamaOnPath" Name="PATH" Value="[INSTALLFOLDER]" Part="last"
+                     Action="set" System="yes" Permanent="no" />
+      </Component>
     </Feature>
   </Package>
 </Wix>
