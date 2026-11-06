@@ -68,6 +68,9 @@ const HORIZONTAL_BAR_HEIGHT: f32 = 10.0;
 /// The small square controls of the second strip.
 const TOOL_SIZE: f32 = 20.0;
 
+/// Rows of context kept above the first change when a file opens on it.
+const CONTEXT_ABOVE_FIRST_CHANGE: usize = 3;
+
 /// How strongly selected lines are washed in the accent colour.
 const SELECTION_WASH: f32 = 0.18;
 
@@ -198,6 +201,11 @@ fn file_name(path: &str) -> &str {
 /// from the first frame. The rows a diff lays out are near-uniform (bands and
 /// summaries are the exceptions) and adjust as they are drawn, so an
 /// approximation is what [`super::metrics`] is for.
+/// The row of the first change, top to bottom: the first ruler mark.
+fn first_change_row(rows: &[DiffRow], files: &[FileDiff]) -> Option<usize> {
+    ruler_marks(rows, files).first().map(|mark| mark.start)
+}
+
 fn reset_list(list: &ListState, len: usize, height: f32) {
     list.reset_with_uniform_height(len, px(height));
 }
@@ -311,6 +319,9 @@ pub struct DiffView {
     selecting: bool,
     /// The hunk under the last right-click, which Copy Hunk copies.
     menu_hunk: Option<(u32, u32)>,
+    /// The next rows laid out open on the first change: a new file or a new
+    /// layout, not a re-read of the one on screen.
+    open_on_first_change: bool,
     focus_handle: FocusHandle,
 }
 
@@ -368,6 +379,7 @@ impl DiffView {
             selection: None,
             selecting: false,
             menu_hunk: None,
+            open_on_first_change: false,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -391,6 +403,7 @@ impl DiffView {
         self.parsed = None;
         self.rows.clear();
         self.list.reset(0);
+        self.open_on_first_change = true;
         self.preview_data = None;
         // Only a Markdown or SVG file can stay on its Preview button.
         if !kind.is_some_and(|kind| !kind.opens_on_preview()) {
@@ -1051,6 +1064,7 @@ impl DiffView {
         }
         let reread = (self.layout == DiffLayout::Hunk) != (layout == DiffLayout::Hunk);
         self.layout = layout;
+        self.open_on_first_change = true;
         if reread {
             self.reload(cx);
         } else {
@@ -1278,6 +1292,16 @@ impl DiffView {
         self.selection = None;
         self.selecting = false;
         reset_list(&self.list, self.rows.len(), super::metrics::LINE_HEIGHT);
+        // After the reset, which puts the list back at its top.
+        if std::mem::take(&mut self.open_on_first_change)
+            && let Some(parsed) = &self.parsed
+            && let Some(row) = first_change_row(&self.rows, &parsed.files)
+        {
+            self.list.scroll_to(gpui_kit::ListOffset {
+                item_ix: row.saturating_sub(CONTEXT_ABOVE_FIRST_CHANGE),
+                offset_in_item: px(0.0),
+            });
+        }
         cx.notify();
     }
 
@@ -2800,6 +2824,20 @@ mod tests {
         Entity<DiffView>,
         &mut gpui_kit::VisualTestContext,
     ) {
+        open_change(cx, "one\ntwo\n", "one\nTWO\nthree\n", DiffLayout::Hunk)
+    }
+
+    /// `before` committed, `after` in the working tree, read in `layout`.
+    fn open_change<'a>(
+        cx: &'a mut gpui_kit::TestAppContext,
+        before: &str,
+        after: &str,
+        layout: DiffLayout,
+    ) -> (
+        crate::git::test_repo::TestRepo,
+        Entity<DiffView>,
+        &'a mut gpui_kit::VisualTestContext,
+    ) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             crate::ui::theme::init(cx);
@@ -2807,10 +2845,10 @@ mod tests {
             crate::keymap::init(cx);
         });
         let repo = crate::git::test_repo::TestRepo::new();
-        repo.write("a.txt", "one\ntwo\n");
+        repo.write("a.txt", before);
         repo.git(&["add", "."]);
         repo.commit("base");
-        repo.write("a.txt", "one\nTWO\nthree\n");
+        repo.write("a.txt", after);
         let slot = Rc::new(std::cell::RefCell::new(None));
         let view_slot = slot.clone();
         let (_root, cx) = cx.add_window_view(|window, cx| {
@@ -2821,7 +2859,7 @@ mod tests {
         let view = slot.borrow().clone().expect("view");
         let path = repo.path().to_string_lossy().into_owned();
         view.update(cx, |view, cx| {
-            view.layout = DiffLayout::Hunk;
+            view.layout = layout;
             view.show(
                 DiffSource::WorkingTreeFile {
                     repo: path,
@@ -2898,5 +2936,31 @@ mod tests {
         );
         cx.dispatch_action(CopyPath);
         assert_eq!(read(cx).as_deref(), Some("a.txt"));
+    }
+
+    /// A whole file opens with its first change on screen, a few lines of
+    /// context above it, not on line 1.
+    #[gpui_kit::test]
+    fn a_file_opens_on_its_first_change(cx: &mut gpui_kit::TestAppContext) {
+        let before: String = (1..=300).map(|n| format!("line {n}\n")).collect();
+        let after = before.replace("line 250\n", "line two hundred fifty\n");
+        let (_repo, view, cx) = open_change(cx, &before, &after, DiffLayout::Split);
+        let (first, top) = view.read_with(cx, |view, _| {
+            let files = &view.parsed.as_ref().expect("parsed").files;
+            (
+                first_change_row(&view.rows, files).expect("a change"),
+                view.list.logical_scroll_top().item_ix,
+            )
+        });
+        assert!(first > 200, "the change is far down: row {first}");
+        assert_eq!(top, first - CONTEXT_ABOVE_FIRST_CHANGE);
+    }
+
+    /// A change near the top leaves the file where it starts.
+    #[gpui_kit::test]
+    fn a_change_near_the_top_keeps_the_top(cx: &mut gpui_kit::TestAppContext) {
+        let (_repo, view, cx) = open_patch(cx);
+        let top = view.read_with(cx, |view, _| view.list.logical_scroll_top().item_ix);
+        assert_eq!(top, 0);
     }
 }
