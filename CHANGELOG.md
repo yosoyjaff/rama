@@ -4,6 +4,23 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.5.0] - 2026-11-06
+
+### Changed
+- Rama draws its text in Geist and its code in Geist Mono, shipped with the
+  app, on every platform.
+- Branch and tag labels in the history are quieter: a faint fill with a thin
+  edge in their colour, and rounder corners.
+- The sidebar's rows highlight as rounded plates, its sections are parted by
+  space instead of lines, and the filter has no border. The branch header and
+  the toolbar under it read as one band.
+- Settings centres its content in a column, with each page's rows in one
+  filled block. About centres the app's name under a larger icon.
+
+### Fixed
+- With more tabs than fit, the active tab is scrolled into view, including
+  the one restored at startup.
+
 ## [0.4.1] - 2026-11-05
 
 ### Added
