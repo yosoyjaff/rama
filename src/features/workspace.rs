@@ -584,14 +584,6 @@ mod tests {
                     .expect("the chip was laid out");
                 let viewport = scroll.bounds();
                 let offset = scroll.offset().x;
-                eprintln!(
-                    "DBG {position} chip={:?}..{:?} vp={:?}..{:?} off={:?}",
-                    chip.left(),
-                    chip.right(),
-                    viewport.left(),
-                    viewport.right(),
-                    offset
-                );
                 chip.left() + offset >= viewport.left() && chip.right() + offset <= viewport.right()
             })
         };
