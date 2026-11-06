@@ -24,7 +24,7 @@ use super::welcome::{Welcome, WelcomeEvent};
 use crate::recents;
 use crate::settings::{self, SavePolicy};
 use crate::ui::icons;
-use crate::ui::tab_strip::{Tab, tab_strip};
+use crate::ui::tab_strip::{Tab, reveal, tab_strip};
 use crate::ui::theme::Theme;
 
 /// One open surface.
@@ -300,7 +300,7 @@ impl Workspace {
             .iter()
             .position(|&tab| tab == self.active)
         {
-            self.tab_scroll.scroll_to_item(position);
+            reveal(&self.tab_scroll, position, window);
         }
         // The keyboard lands on the Home with it, so Tab walks its buttons
         // and recent rows straight away.

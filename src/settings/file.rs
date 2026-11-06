@@ -34,6 +34,11 @@ pub fn instance_path() -> PathBuf {
 }
 
 fn config_dir() -> PathBuf {
+    // Tests never read or write the real user's files: their settings, tabs
+    // and instance port would leak into the run, and the run into them.
+    if cfg!(test) {
+        return std::env::temp_dir().join(format!("rama-test-{}", std::process::id()));
+    }
     let home = std::env::var_os("HOME").map(PathBuf::from);
     if cfg!(target_os = "windows") {
         if let Some(appdata) = std::env::var_os("APPDATA") {
