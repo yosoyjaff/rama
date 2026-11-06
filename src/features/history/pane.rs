@@ -510,8 +510,8 @@ impl HistoryPane {
             .items_center()
             .gap(px(6.0))
             .px(px(EDGE_INSET))
-            .border_b_1()
-            .border_color(crate::ui::theme::hairline(0.06))
+            // No rule under it: the toolbar below is the same band, and its
+            // own hairline closes both.
             .bg(theme.surface)
             .child(self.branch_picker.clone())
             .child(div().flex_1().min_w_0())
