@@ -366,8 +366,8 @@ impl Theme {
             diff_add: status.success,
             diff_del: status.danger,
             diff_hunk_bg: status.hunk,
-            font_sans: system_font(false).into(),
-            font_mono: system_font(true).into(),
+            font_sans: super::fonts::SANS.into(),
+            font_mono: super::fonts::MONO.into(),
         };
         match appearance {
             // In the dark, each plane up the stack is a step lighter.
@@ -455,6 +455,8 @@ struct Themes {
 impl Global for Themes {}
 
 pub fn init(cx: &mut App) {
+    // The theme names these faces; register them first.
+    super::fonts::init(cx);
     set_accent(AccentColor::default(), cx);
 }
 
@@ -638,18 +640,6 @@ pub fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
         (r - g) / spread + 4.0
     };
     (sector / 6.0, saturation, lightness)
-}
-
-/// The platform's interface or monospace font.
-fn system_font(mono: bool) -> &'static str {
-    match (cfg!(target_os = "macos"), cfg!(target_os = "windows"), mono) {
-        (true, _, false) => "Helvetica",
-        (true, _, true) => "Menlo",
-        (_, true, false) => "Segoe UI",
-        (_, true, true) => "Consolas",
-        (_, _, false) => "DejaVu Sans",
-        (_, _, true) => "DejaVu Sans Mono",
-    }
 }
 
 #[cfg(test)]

@@ -590,14 +590,24 @@ mod tests {
 
         // The strip is on screen before anything opens, as in the app: the
         // scroll handle measures its viewport a frame behind.
+        //
+        // Tabs open one at a time in the app, so the strip has reached its
+        // full width before one falls off its end. GPUI scrolls an item into
+        // view against the viewport of the frame before; fifty at once would
+        // measure them against the one-chip strip that frame drew.
         draw(&mut visual);
-        visual.update(|window, cx| {
-            workspace.update(cx, |workspace, cx| {
-                for index in 0..50 {
-                    workspace.open_repository(format!("/repos/{index:02}"), window, cx);
-                }
-            })
-        });
+        let open = |range: std::ops::Range<usize>, visual: &mut gpui_kit::VisualTestContext| {
+            visual.update(|window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    for index in range {
+                        workspace.open_repository(format!("/repos/{index:02}"), window, cx);
+                    }
+                })
+            });
+        };
+        open(0..49, &mut visual);
+        draw(&mut visual);
+        open(49..50, &mut visual);
         draw(&mut visual);
         assert!(
             visible(&workspace, 49, &mut visual),

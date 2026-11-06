@@ -196,7 +196,8 @@ impl SettingsPage {
             .px_2()
             .bg(theme.surface)
             .border_r_1()
-            .border_color(theme.border)
+            // The same edge as the history's sidebar.
+            .border_color(theme.border.opacity(0.6))
             .child(
                 div()
                     .px_2()

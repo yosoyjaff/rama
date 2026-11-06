@@ -33,6 +33,12 @@ const SECTION_HEIGHT: f32 = 28.0;
 const ROW_HEIGHT: f32 = 24.0;
 /// How far a row is indented past its section's chevron.
 const ROW_INDENT: f32 = 28.0;
+/// Rows and section headers wash as a rounded plate held this far in from
+/// the panel's sides, not as a band from edge to edge.
+const ROW_INSET: f32 = 6.0;
+const ROW_RADIUS: f32 = 6.0;
+/// Between two sections: room, not a rule.
+const SECTION_GAP: f32 = 6.0;
 
 /// Which list a section shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -261,18 +267,18 @@ impl RepoNav {
             .w_full()
             .flex()
             .flex_col()
-            .border_b_1()
-            .border_color(theme.border.opacity(0.7))
+            .pb(px(SECTION_GAP))
             .child(
                 div()
                     .id(id)
                     .h(px(SECTION_HEIGHT))
-                    .w_full()
+                    .mx(px(ROW_INSET))
+                    .rounded(px(ROW_RADIUS))
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(6.0))
-                    .px(px(EDGE_INSET))
+                    .px(px(EDGE_INSET - ROW_INSET))
                     .cursor_pointer()
                     .bg(motion::fade_color(&fade, wash(0.0), wash(0.06)))
                     .on_hover(motion::on_hover_fade(&fade))
@@ -361,13 +367,14 @@ impl RepoNav {
         div()
             .id(id.clone())
             .h(px(ROW_HEIGHT))
-            .w_full()
+            .mx(px(ROW_INSET))
+            .rounded(px(ROW_RADIUS))
             .flex()
             .flex_row()
             .items_center()
             .gap(px(6.0))
-            .pl(px(ROW_INDENT))
-            .pr(px(EDGE_INSET))
+            .pl(px(ROW_INDENT - ROW_INSET))
+            .pr(px(EDGE_INSET - ROW_INSET))
             .cursor_pointer()
             .bg(motion::fade_color(&id, wash(0.0), wash(0.07)))
             .on_hover(motion::on_hover_fade(&id))
@@ -566,7 +573,7 @@ impl Render for RepoNav {
             .rounded_bl(px(corner))
             .bg(theme.surface)
             .border_r_1()
-            .border_color(theme.border)
+            .border_color(theme.border.opacity(0.6))
             .child(
                 // What the panel is showing, counted, above the filter.
                 div()
@@ -588,23 +595,21 @@ impl Render for RepoNav {
             .child(
                 div().flex_none().px(px(EDGE_INSET)).pb(px(6.0)).child(
                     div()
-                        .h(px(26.0))
+                        .h(px(28.0))
                         .w_full()
                         .flex()
                         .flex_row()
                         .items_center()
-                        .gap(px(5.0))
-                        .px(px(7.0))
-                        .rounded_md()
+                        .gap(px(6.0))
+                        .px(px(8.0))
+                        .rounded(px(ROW_RADIUS))
                         .bg(theme.input_bg)
-                        .border_1()
-                        .border_color(theme.border)
-                        .child(div().flex_1().min_w_0().child(self.filter.clone()))
                         .child(
                             icons::icon(icons::MAGNIFER)
                                 .size(px(12.0))
                                 .text_color(theme.text_faint),
-                        ),
+                        )
+                        .child(div().flex_1().min_w_0().child(self.filter.clone())),
                 ),
             )
             .child(

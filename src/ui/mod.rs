@@ -13,6 +13,7 @@
 
 pub mod avatar;
 pub mod chrome;
+pub mod fonts;
 pub mod icons;
 pub mod lane_palette;
 pub mod loaders;
