@@ -566,7 +566,7 @@ impl Render for RepoNav {
             .rounded_bl(px(corner))
             .bg(theme.surface)
             .border_r_1()
-            .border_color(theme.border)
+            .border_color(theme.border.opacity(0.6))
             .child(
                 // What the panel is showing, counted, above the filter.
                 div()

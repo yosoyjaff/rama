@@ -42,9 +42,13 @@ const MORE_HEIGHT: f32 = 18.0;
 const MORE_GAP: f32 = 5.0;
 /// Fill of a label, as a share of its lane colour: at rest, hovered, and
 /// for the checked-out branch.
-const FILL: f32 = 0.25;
-const FILL_HOVER: f32 = 0.45;
-const FILL_CURRENT: f32 = 0.50;
+const FILL: f32 = 0.16;
+const FILL_HOVER: f32 = 0.28;
+const FILL_CURRENT: f32 = 0.34;
+/// The hairline rim that draws a label's edge, so the fill can stay faint.
+const RIM: f32 = 0.38;
+/// Corner of a label, the `+N` chip and the layer behind them.
+const LABEL_RADIUS: f32 = 4.0;
 /// The line from a label to its node, faint so it never reads as a lane.
 const LEADER: f32 = 0.22;
 
@@ -353,7 +357,7 @@ impl HistoryView {
             // An opaque base, so the graph does not show through the tint.
             div()
                 .flex()
-                .rounded(px(2.0))
+                .rounded(px(LABEL_RADIUS))
                 .bg(theme.bg)
                 .child(self.render_group(sha, badge, tone, true, theme, cx))
         });
@@ -464,7 +468,9 @@ impl HistoryView {
             .px(px(LABEL_PAD_X))
             .flex()
             .items_center()
-            .rounded(px(2.0))
+            .rounded(px(LABEL_RADIUS))
+            .border_1()
+            .border_color(tone.opacity(RIM))
             .bg(tone.opacity(rest))
             .hover(move |s| s.bg(tone.opacity(hover)))
             .text_size(px(LABEL_TEXT))
@@ -534,7 +540,7 @@ fn render_more(count: usize, tone: Hsla, theme: &Theme) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(2.0))
+        .rounded(px(LABEL_RADIUS))
         .bg(tone.opacity(FILL))
         .text_size(px(LABEL_TEXT))
         .text_color(theme.text)

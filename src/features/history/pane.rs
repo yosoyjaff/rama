@@ -511,7 +511,7 @@ impl HistoryPane {
             .gap(px(6.0))
             .px(px(EDGE_INSET))
             .border_b_1()
-            .border_color(theme.border)
+            .border_color(crate::ui::theme::hairline(0.06))
             .bg(theme.surface)
             .child(self.branch_picker.clone())
             .child(div().flex_1().min_w_0())
