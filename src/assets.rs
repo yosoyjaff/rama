@@ -38,9 +38,10 @@ const OVERRIDES: &[(&str, &[u8])] = &[
     ),
 ];
 
-/// The app icon, as drawn on the About page.
-pub const APP_ICON: &str = "app-icon/128x128.png";
-const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/app-icon/128x128.png");
+/// The app icon, as drawn on the About page: the 256px file, so it stays
+/// sharp at its size on a 2× display.
+pub const APP_ICON: &str = "app-icon/256x256.png";
+const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/app-icon/256x256.png");
 
 /// This application's assets, with GPUI Kit's bundled icons behind them.
 #[derive(Clone, Copy, Debug, Default)]

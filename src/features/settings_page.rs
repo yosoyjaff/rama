@@ -16,7 +16,6 @@ use gpui_kit::{
 use crate::features::command_line::{self, CommandStatus, InstallCommandLine};
 use crate::recents;
 use crate::settings::{self, Accent, Mode, SavePolicy, Settings};
-use crate::ui::chrome::EDGE_INSET;
 use crate::ui::lane_palette::LanePalette;
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::{AccentColor, Theme, wash};
@@ -25,11 +24,25 @@ use crate::ui::{icons, motion};
 
 /// Width of the section rail.
 const RAIL_WIDTH: f32 = 176.0;
-/// Width the page's content is held to, so a line of prose stays readable on
-/// a wide window.
-const PAGE_WIDTH: f32 = 560.0;
-/// Side of the app icon above the About page's title.
-const LOGO_SIZE: f32 = 64.0;
+/// The page is a column held to this width and centred in whatever room the
+/// rail leaves, with air either side, so a line of prose stays readable and
+/// a wide window does not leave it stranded against the rail.
+const PAGE_MAX_WIDTH: f32 = 720.0;
+const PAGE_PAD_X: f32 = 40.0;
+/// The page title and subtitle sit this far inside the block's edge, flush
+/// with the row text.
+const TITLE_INSET: f32 = 8.0;
+/// The block the rows sit in: a faint fill, no outline, round corners.
+const BLOCK_RADIUS: f32 = 12.0;
+const BLOCK_FILL: f32 = 0.045;
+/// A row's text sits this far in from the block's edge; the hairline between
+/// rows starts there too.
+const ROW_INSET_X: f32 = 16.0;
+const ROW_PAD_Y: f32 = 12.0;
+/// Side of the app icon above the About page's title, and the corner its
+/// glow follows (the icon's own squircle).
+const LOGO_SIZE: f32 = 88.0;
+const LOGO_RADIUS: f32 = 20.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -261,9 +274,7 @@ impl SettingsPage {
             .flex_row()
             .items_center()
             .gap_4()
-            .py(px(10.0))
-            .border_b_1()
-            .border_color(theme.border.opacity(0.6))
+            .py(px(ROW_PAD_Y))
             .child(
                 div()
                     .flex_1()
@@ -274,12 +285,13 @@ impl SettingsPage {
                     .child(
                         div()
                             .text_size(ui_rems(13.0))
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
                             .text_color(theme.text)
                             .child(title),
                     )
                     .child(
                         div()
-                            .text_size(ui_rems(11.5))
+                            .text_size(ui_rems(12.0))
                             .text_color(theme.text_muted)
                             .child(description),
                     ),
@@ -561,9 +573,7 @@ impl SettingsPage {
             .flex()
             .flex_col()
             .gap_2()
-            .py(px(10.0))
-            .border_b_1()
-            .border_color(theme.border.opacity(0.6))
+            .py(px(ROW_PAD_Y))
             .child(
                 div()
                     .flex()
@@ -572,12 +582,13 @@ impl SettingsPage {
                     .child(
                         div()
                             .text_size(ui_rems(13.0))
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
                             .text_color(theme.text)
                             .child("Graph colors"),
                     )
                     .child(
                         div()
-                            .text_size(ui_rems(11.5))
+                            .text_size(ui_rems(12.0))
                             .text_color(theme.text_muted)
                             .child("The colours the history graph paints its branches with."),
                     ),
@@ -735,50 +746,48 @@ impl SettingsPage {
     fn render_about(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let platform = format!("{} · {}", platform_name(), std::env::consts::ARCH);
         let repository = env!("CARGO_PKG_REPOSITORY");
-        let identity = div()
-            .pb(px(12.0))
-            .border_b_1()
-            .border_color(theme.border.opacity(0.6))
-            .child(
-                div()
-                    .text_size(ui_rems(13.0))
-                    .text_color(theme.text)
-                    .child(env!("CARGO_PKG_DESCRIPTION")),
-            )
-            .into_any_element();
-        let logo = img(crate::assets::APP_ICON)
+        // The icon is a dark tile; on the dark page it would sink. A soft
+        // glow in the accent lifts it off the plane in either appearance.
+        let logo = div()
             .size(px(LOGO_SIZE))
-            .mb(px(12.0))
+            .mb(px(16.0))
+            .rounded(px(LOGO_RADIUS))
+            .shadow(vec![gpui_kit::BoxShadow {
+                color: theme.accent.opacity(0.28),
+                offset: gpui_kit::point(px(0.0), px(10.0)),
+                blur_radius: px(36.0),
+                spread_radius: px(-4.0),
+                inset: false,
+            }])
+            .child(img(crate::assets::APP_ICON).size_full())
             .into_any_element();
         self.page_under(
             Some(logo),
             crate::APP_NAME,
-            vec![
-                identity,
-                self.fact("Version", env!("CARGO_PKG_VERSION").into(), theme),
-            ]
-            .into_iter()
-            .chain(
-                self.update_panel
-                    .clone()
-                    .map(|panel| self.fact_element("Updates", panel.into_any_element(), theme)),
-            )
-            .chain([self.fact("Platform", platform.into(), theme)])
-            .chain(command_line::status(cx).map(|status| {
-                self.fact_element("Terminal command", command_control(status, theme), theme)
-            }))
-            .chain([
-                self.fact("License", env!("CARGO_PKG_LICENSE").into(), theme),
-                self.fact_element(
-                    "Source code",
-                    Link::new("settings-about-repository")
-                        .href(repository)
-                        .child(repository.trim_start_matches("https://"))
-                        .into_any_element(),
-                    theme,
-                ),
-            ])
-            .collect(),
+            Some(env!("CARGO_PKG_DESCRIPTION")),
+            vec![self.fact("Version", env!("CARGO_PKG_VERSION").into(), theme)]
+                .into_iter()
+                .chain(
+                    self.update_panel
+                        .clone()
+                        .map(|panel| self.fact_element("Updates", panel.into_any_element(), theme)),
+                )
+                .chain([self.fact("Platform", platform.into(), theme)])
+                .chain(command_line::status(cx).map(|status| {
+                    self.fact_element("Terminal command", command_control(status, theme), theme)
+                }))
+                .chain([
+                    self.fact("License", env!("CARGO_PKG_LICENSE").into(), theme),
+                    self.fact_element(
+                        "Source code",
+                        Link::new("settings-about-repository")
+                            .href(repository)
+                            .child(repository.trim_start_matches("https://"))
+                            .into_any_element(),
+                        theme,
+                    ),
+                ])
+                .collect(),
             theme,
         )
     }
@@ -804,9 +813,7 @@ impl SettingsPage {
             .flex_row()
             .items_center()
             .gap_4()
-            .py(px(10.0))
-            .border_b_1()
-            .border_color(theme.border.opacity(0.6))
+            .py(px(ROW_PAD_Y))
             .text_size(ui_rems(12.5))
             .child(
                 div()
@@ -820,17 +827,34 @@ impl SettingsPage {
     }
 
     fn page(&self, title: &'static str, rows: Vec<AnyElement>, theme: &Theme) -> AnyElement {
-        self.page_under(None, title, rows, theme)
+        self.page_under(None, title, None, rows, theme)
     }
 
-    /// A page with something drawn above its title, such as About's logo.
+    /// A page with something drawn above its title, such as About's logo,
+    /// and a line under it. The rows share one filled block, split by
+    /// hairlines that start where their text does.
     fn page_under(
         &self,
         above_title: Option<AnyElement>,
         title: &'static str,
+        subtitle: Option<&'static str>,
         rows: Vec<AnyElement>,
         theme: &Theme,
     ) -> AnyElement {
+        let block = div()
+            .mt(px(20.0))
+            .rounded(px(BLOCK_RADIUS))
+            .bg(wash(BLOCK_FILL))
+            .flex()
+            .flex_col()
+            .children(rows.into_iter().enumerate().map(|(index, row)| {
+                div()
+                    .mx(px(ROW_INSET_X))
+                    .when(index > 0, |row| {
+                        row.border_t_1().border_color(theme.border.opacity(0.6))
+                    })
+                    .child(row)
+            }));
         div()
             .id("settings-page")
             .flex_1()
@@ -838,23 +862,45 @@ impl SettingsPage {
             .h_full()
             .overflow_y_scroll()
             .child(
-                div()
-                    .w(px(PAGE_WIDTH))
-                    .max_w_full()
-                    .px(px(EDGE_INSET * 3.0))
-                    .py(px(20.0))
-                    .flex()
-                    .flex_col()
-                    .children(above_title)
-                    .child(
-                        div()
-                            .pb(px(8.0))
-                            .text_size(ui_rems(16.0))
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .text_color(theme.text)
-                            .child(title),
-                    )
-                    .children(rows),
+                // Centred: GPUI has no auto margin, so the row centres it.
+                div().w_full().flex().flex_row().justify_center().child(
+                    div()
+                        .w_full()
+                        .max_w(px(PAGE_MAX_WIDTH))
+                        .px(px(PAGE_PAD_X))
+                        .pt(px(32.0))
+                        .pb(px(48.0))
+                        .flex()
+                        .flex_col()
+                        .child(
+                            // A page with an emblem (About) centres its
+                            // heading under it, as an identity; the others
+                            // keep theirs flush with the rows.
+                            div()
+                                .px(px(TITLE_INSET))
+                                .flex()
+                                .flex_col()
+                                .when(above_title.is_some(), |heading| {
+                                    heading.items_center().text_center().pt(px(16.0))
+                                })
+                                .children(above_title)
+                                .child(
+                                    div()
+                                        .text_size(ui_rems(20.0))
+                                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(title),
+                                )
+                                .children(subtitle.map(|subtitle| {
+                                    div()
+                                        .mt(px(4.0))
+                                        .text_size(ui_rems(13.0))
+                                        .text_color(theme.text_muted)
+                                        .child(subtitle)
+                                })),
+                        )
+                        .child(block),
+                ),
             )
             .into_any_element()
     }
