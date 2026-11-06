@@ -4,6 +4,19 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.4.1] - 2026-11-05
+
+### Added
+- macOS: the first launch installs the `rama` terminal command. If that
+  fails, Settings > About > Terminal command installs it.
+
+### Changed
+- Opening a file in the diff scrolls to its first change, with three lines
+  above it. Changing the layout does the same.
+
+### Fixed
+- Windows: the build no longer fails lint on a Unix-only constant.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added
