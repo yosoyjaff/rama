@@ -11,7 +11,7 @@
 //!
 //! What does not fit scrolls, with nothing drawn for it — no bar, no shadow:
 //! the wheel moves the chips, and the owner brings the active one into view
-//! through the [`gpui_kit::ScrollHandle`] it passes in.
+//! with [`reveal`], on the [`gpui_kit::ScrollHandle`] it passes in.
 
 use gpui_kit::{
     AnyElement, App, ElementId, IntoElement, SharedString, Window, div, prelude::*, px,
@@ -30,6 +30,44 @@ pub const CHIP_HEIGHT: f32 = 24.0;
 pub const CHIP_GAP: f32 = 4.0;
 /// The leading and trailing slots inside a chip.
 const SLOT_SIZE: f32 = 18.0;
+
+/// Scroll the strip just far enough to show chip `index`, and no further.
+///
+/// The chips are uniform, so where one sits is arithmetic; GPUI's own
+/// `scroll_to_item` measures against bounds from an earlier layout and, when
+/// tabs open in a burst or before the strip has been drawn, leaves the chip
+/// off screen. Before the first frame there is no viewport to measure, so
+/// the move waits for one.
+pub fn reveal(scroll: &gpui_kit::ScrollHandle, index: usize, window: &Window) {
+    let viewport = scroll.bounds().size.width;
+    if viewport <= px(0.0) {
+        let scroll = scroll.clone();
+        window.on_next_frame(move |window, _| {
+            if scroll.bounds().size.width > px(0.0) {
+                reveal(&scroll, index, window);
+            }
+        });
+        return;
+    }
+    let mut offset = scroll.offset();
+    offset.x = reveal_offset(index, f32::from(offset.x), f32::from(viewport)).into();
+    scroll.set_offset(offset);
+}
+
+/// The horizontal offset that shows chip `index` in a viewport `viewport`
+/// wide, from offset `current`: unchanged if it is already in full view,
+/// else the chip lands flush against the nearer edge.
+fn reveal_offset(index: usize, current: f32, viewport: f32) -> f32 {
+    let left = index as f32 * (CHIP_WIDTH + CHIP_GAP);
+    let right = left + CHIP_WIDTH;
+    if left + current < 0.0 {
+        -left
+    } else if right + current > viewport {
+        (viewport - right).min(0.0)
+    } else {
+        current
+    }
+}
 
 /// What one chip says.
 pub struct Tab {
@@ -203,5 +241,36 @@ impl RenderOnce for CloseGlyph {
         crate::ui::icons::icon(crate::ui::icons::CLOSE)
             .size(px(12.0))
             .text_color(Theme::of(cx).text_muted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const STEP: f32 = CHIP_WIDTH + CHIP_GAP;
+
+    #[test]
+    fn a_chip_already_in_view_does_not_move_the_strip() {
+        assert_eq!(reveal_offset(2, 0.0, 600.0), 0.0);
+        assert_eq!(reveal_offset(10, -STEP * 8.0, 600.0), -STEP * 8.0);
+    }
+
+    #[test]
+    fn a_chip_past_the_right_edge_lands_against_it() {
+        let offset = reveal_offset(49, 0.0, 600.0);
+        assert_eq!(49.0 * STEP + CHIP_WIDTH + offset, 600.0);
+    }
+
+    #[test]
+    fn a_chip_past_the_left_edge_lands_against_it() {
+        assert_eq!(reveal_offset(3, -STEP * 20.0, 600.0), -STEP * 3.0);
+    }
+
+    #[test]
+    fn a_strip_that_fits_never_scrolls() {
+        for index in 0..5 {
+            assert_eq!(reveal_offset(index, 0.0, 600.0), 0.0);
+        }
     }
 }
