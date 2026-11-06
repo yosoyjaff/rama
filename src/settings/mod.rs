@@ -366,6 +366,9 @@ pub struct Settings {
     pub tabs: Tabs,
     /// The GitKraken import ran, so the home screen stops offering it.
     pub gitkraken_imported: bool,
+    /// macOS: the first launch already offered the `rama` terminal command,
+    /// so it is not asked again; Settings → About still offers it.
+    pub command_line_offered: bool,
 }
 
 impl Settings {

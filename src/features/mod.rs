@@ -12,6 +12,7 @@
 //! dependencies and release cadence; until then a module is the same boundary
 //! with less ceremony.
 
+pub mod command_line;
 pub mod diff;
 pub mod history;
 pub mod settings_page;
