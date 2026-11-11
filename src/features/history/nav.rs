@@ -13,7 +13,8 @@ use std::path::Path;
 
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    IntoElement, Render, SharedString, Subscription, Task, Window, div, prelude::*, px,
+    IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Render, SharedString, Subscription,
+    Task, Window, div, prelude::*, px,
 };
 
 use crate::git::actions::{GitAction, StashEntry};
@@ -91,6 +92,8 @@ pub enum RepoNavEvent {
     RepositoryChanged,
     /// The action failed, with git's own words.
     ActionFailed(SharedString),
+    /// A stash was right-clicked: its menu opens at `at`.
+    StashMenu { at: Point<Pixels>, sha: String },
 }
 
 pub struct RepoNav {
@@ -535,9 +538,10 @@ impl Render for RepoNav {
             .into_iter()
             .map(|stash| {
                 let index = stash.index;
+                let sha = stash.sha.clone();
                 let label = format!("{}  {}", stash.selector, stash.message);
-                self.render_row(
-                    format!("repo-nav-stash-{}", stash.index),
+                let row = self.render_row(
+                    format!("repo-nav-stash-{}", stash.sha),
                     icons::ARCHIVE_UP_MINIMALISTIC,
                     label,
                     false,
@@ -551,7 +555,21 @@ impl Render for RepoNav {
                             cx,
                         );
                     },
-                )
+                );
+                div()
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |_, event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            cx.emit(RepoNavEvent::StashMenu {
+                                at: event.position,
+                                sha: sha.clone(),
+                            });
+                        }),
+                    )
+                    .child(row)
+                    .into_any_element()
             })
             .collect();
 

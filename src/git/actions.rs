@@ -145,6 +145,10 @@ pub enum GitAction {
     StashPop {
         index: u32,
     },
+    /// Delete the stash entry `sha`, wherever it is in the list by now.
+    StashDrop {
+        sha: String,
+    },
     /// Commit what is staged, or amend HEAD with it and a new message.
     Commit {
         message: String,
@@ -809,6 +813,18 @@ pub fn run(root: &Path, action: GitAction) -> Result<GitActionOutcome> {
             git(root, &["stash", "pop", &format!("stash@{{{index}}}")])?;
             said("stash restored")
         }
+        StashDrop { sha } => {
+            let listed = git(root, &["stash", "list", "--format=%gd%x1f%H"])?;
+            let selector = listed
+                .lines()
+                .find_map(|line| {
+                    let (selector, entry) = line.split_once('\u{1f}')?;
+                    (entry.trim() == sha).then(|| selector.trim().to_string())
+                })
+                .ok_or_else(|| anyhow!("that stash is no longer there"))?;
+            git(root, &["stash", "drop", &selector])?;
+            said("stash deleted")
+        }
         Commit { message, amend } => {
             let sha = super::status::commit(root, &message, amend)?;
             said(format!("committed {}", short(&sha)))
@@ -825,21 +841,26 @@ pub struct StashEntry {
     /// Its `n` in `stash@{n}`.
     pub index: u32,
     pub selector: String,
+    pub sha: String,
     pub message: String,
 }
 
 /// The stash, newest first. No stash is an empty list.
 pub fn list_stashes(root: &Path) -> Result<Vec<StashEntry>> {
-    let listed = git(root, &["stash", "list", "--format=%gd%x09%gs"])?;
+    let listed = git(root, &["stash", "list", "--format=%gd%x09%H%x09%gs"])?;
     Ok(listed
         .lines()
         .filter(|line| !line.trim().is_empty())
         .zip(0..)
         .map(|(line, index)| {
-            let (selector, message) = line.split_once('\t').unwrap_or((line, ""));
+            let mut fields = line.splitn(3, '\t');
+            let selector = fields.next().unwrap_or_default();
+            let sha = fields.next().unwrap_or_default();
+            let message = fields.next().unwrap_or_default();
             StashEntry {
                 index,
                 selector: selector.trim().to_string(),
+                sha: sha.trim().to_string(),
                 message: message.trim().to_string(),
             }
         })
@@ -1076,6 +1097,27 @@ mod tests {
         assert!(stashes[0].message.contains("kept"));
         run(repo.path(), GitAction::StashPop { index: 0 }).unwrap();
         assert!(list_stashes(repo.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_stash_is_dropped_by_its_sha_wherever_it_moved() {
+        let repo = TestRepo::new();
+        tracked(&repo, "a.txt", "1\n", "first");
+        let push = |message: &str| GitAction::StashPush {
+            message: Some(message.into()),
+            include_untracked: false,
+        };
+        repo.write("a.txt", "older\n");
+        run(repo.path(), push("older")).unwrap();
+        let older = list_stashes(repo.path()).unwrap()[0].sha.clone();
+        repo.write("a.txt", "newer\n");
+        run(repo.path(), push("newer")).unwrap();
+
+        run(repo.path(), GitAction::StashDrop { sha: older.clone() }).unwrap();
+        let left = list_stashes(repo.path()).unwrap();
+        assert_eq!(left.len(), 1);
+        assert!(left[0].message.contains("newer"));
+        assert!(run(repo.path(), GitAction::StashDrop { sha: older }).is_err());
     }
 
     #[test]

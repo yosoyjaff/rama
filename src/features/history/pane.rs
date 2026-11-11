@@ -176,6 +176,12 @@ impl HistoryPane {
                 RepoNavEvent::ActionFailed(message) => {
                     toast::show(ToastKind::Error, message.to_string(), cx);
                 }
+                RepoNavEvent::StashMenu { at, sha } => {
+                    let (at, sha) = (*at, sha.clone());
+                    pane.graph.update(cx, |graph, cx| {
+                        graph.open_context_menu(at, sha, super::actions::Aim::Stash, cx);
+                    });
+                }
             }),
         );
 
