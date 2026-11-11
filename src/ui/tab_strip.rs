@@ -81,15 +81,19 @@ pub struct Tab {
     pub active: bool,
     /// Whether this tab can be closed. The pane's home tab cannot.
     pub closable: bool,
+    /// A field editing the title, drawn in its place.
+    pub editor: Option<AnyElement>,
 }
 
-/// Draw the strip. `on_select` and `on_close` receive the tab's index;
+/// Draw the strip. `on_select`, `on_rename` (a double click) and `on_close`
+/// receive the tab's index;
 /// `scroll` is the strip's own offset, which `scroll_to_item(index)` moves
 /// just far enough to show a chip.
 pub fn tab_strip(
     tabs: Vec<Tab>,
     scroll: &gpui_kit::ScrollHandle,
     on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
+    on_rename: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
     on_close: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
 ) -> AnyElement {
     let mut strip = div()
@@ -102,7 +106,13 @@ pub fn tab_strip(
         .overflow_x_scroll()
         .track_scroll(scroll);
     for (index, tab) in tabs.into_iter().enumerate() {
-        strip = strip.child(chip(index, tab, on_select.clone(), on_close.clone()));
+        strip = strip.child(chip(
+            index,
+            tab,
+            on_select.clone(),
+            on_rename.clone(),
+            on_close.clone(),
+        ));
     }
     strip.into_any_element()
 }
@@ -111,6 +121,7 @@ fn chip(
     index: usize,
     tab: Tab,
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
+    on_rename: impl Fn(usize, &mut Window, &mut App) + 'static,
     on_close: impl Fn(usize, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
     let group = tab.group.clone();
@@ -137,9 +148,13 @@ fn chip(
             chip.bg(motion::fade_color(&fade, wash(0.0), wash(0.06)))
                 .on_hover(motion::on_hover_fade(&fade))
         })
-        .on_click(move |_, window, cx| {
+        .on_click(move |event, window, cx| {
             cx.stop_propagation();
-            on_select(index, window, cx);
+            if event.click_count() == 2 {
+                on_rename(index, window, cx);
+            } else {
+                on_select(index, window, cx);
+            }
         })
         .children(tab.icon.map(|path| {
             div()
@@ -159,9 +174,12 @@ fn chip(
                 .flex_1()
                 .truncate()
                 .text_size(ui_rems(11.5))
-                .child(TabTitle {
-                    title: tab.title,
-                    active: tab.active,
+                .map(|slot| match tab.editor {
+                    Some(editor) => slot.child(editor),
+                    None => slot.child(TabTitle {
+                        title: tab.title,
+                        active: tab.active,
+                    }),
                 }),
         )
         // The trailing slot is permanently reserved, so a chip never changes

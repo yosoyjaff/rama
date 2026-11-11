@@ -25,6 +25,7 @@ use crate::recents;
 use crate::settings::{self, SavePolicy};
 use crate::ui::icons;
 use crate::ui::tab_strip::{Tab, reveal, tab_strip};
+use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::Theme;
 
 /// One open surface.
@@ -76,7 +77,16 @@ pub struct Workspace {
     tab_scroll: gpui_kit::ScrollHandle,
     /// The update row the shell hands down for Settings → About.
     update_panel: Option<gpui_kit::AnyView>,
+    /// The tab whose name is being edited in its chip.
+    renaming: Option<Renaming>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// A tab's name being edited in place.
+struct Renaming {
+    index: usize,
+    input: Entity<TextInput>,
+    _events: Subscription,
 }
 
 impl Workspace {
@@ -101,6 +111,7 @@ impl Workspace {
             focus_handle: cx.focus_handle(),
             tab_scroll: gpui_kit::ScrollHandle::new(),
             update_panel: None,
+            renaming: None,
             _subscriptions: subscriptions,
         };
         // The tabs the last session left open come back — but UNLOADED: only
@@ -166,8 +177,9 @@ impl Workspace {
         } else {
             cx.new(|cx| HistoryPane::new(None, window, cx))
         };
+        let given = settings::current(cx).tabs.names.get(&path).cloned();
         self.tabs.push(Surface::Repo {
-            name: SharedString::from(recents::repository_name(&path)),
+            name: SharedString::from(given.unwrap_or_else(|| recents::repository_name(&path))),
             path,
             pane,
             loaded,
@@ -310,12 +322,7 @@ impl Workspace {
         }
         self.sync_open_paths(cx);
         self.persist_tabs(cx);
-        // The window says what is being read, the way every editor does.
-        let title = match self.tabs.get(self.active) {
-            Some(Surface::Home) | None => crate::APP_NAME.to_string(),
-            Some(surface) => format!("{} — {}", surface.title(), crate::APP_NAME),
-        };
-        window.set_window_title(&title);
+        self.sync_window_title(window);
         cx.notify();
     }
 
@@ -324,6 +331,8 @@ impl Workspace {
         if index == 0 || index >= self.tabs.len() {
             return;
         }
+        // Indices shift under an edit in progress: it ends unsaved.
+        self.renaming = None;
         self.tabs.remove(index);
         let next = if self.active >= index {
             self.active.saturating_sub(1)
@@ -331,6 +340,92 @@ impl Workspace {
             self.active
         };
         self.activate(next, window, cx);
+    }
+
+    /// Edit the name of tab `index` in its chip.
+    fn start_rename(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Surface::Repo { name, .. }) = self.tabs.get(index) else {
+            return;
+        };
+        let name = name.clone();
+        let input = cx.new(|cx| {
+            let mut input = TextInput::new("Tab name", window, cx)
+                .with_text_size(11.5)
+                .compact();
+            input.set_text(name, window, cx);
+            input
+        });
+        let events = cx.subscribe_in(
+            &input,
+            window,
+            |workspace: &mut Self, _, event, window, cx| {
+                match event {
+                    TextInputEvent::Submitted => workspace.finish_rename(true, true, window, cx),
+                    // Focus went somewhere on purpose: leave it there.
+                    TextInputEvent::Blurred => workspace.finish_rename(true, false, window, cx),
+                    TextInputEvent::Edited => {}
+                }
+            },
+        );
+        let focus = input.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        self.renaming = Some(Renaming {
+            index,
+            input,
+            _events: events,
+        });
+        cx.notify();
+    }
+
+    /// End the edit, keeping the typed name when `save`. A blank name gives
+    /// the tab its folder's name back. `refocus` hands the keyboard back to
+    /// the window when the edit ended from the keyboard.
+    fn finish_rename(
+        &mut self,
+        save: bool,
+        refocus: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(renaming) = self.renaming.take() else {
+            return;
+        };
+        if save {
+            let typed = renaming.input.read(cx).text().trim().to_string();
+            if let Some(Surface::Repo { path, name, .. }) = self.tabs.get_mut(renaming.index) {
+                let path = path.clone();
+                let given = (!typed.is_empty()).then_some(typed);
+                *name = SharedString::from(
+                    given
+                        .clone()
+                        .unwrap_or_else(|| recents::repository_name(&path)),
+                );
+                settings::update(SavePolicy::Debounced, cx, |settings| match given {
+                    Some(given) => {
+                        settings.tabs.names.insert(path, given);
+                    }
+                    None => {
+                        settings.tabs.names.remove(&path);
+                    }
+                });
+            }
+            if renaming.index == self.active {
+                self.sync_window_title(window);
+            }
+        }
+        if refocus {
+            window.focus(&self.focus_handle, cx);
+        }
+        cx.notify();
+    }
+
+    /// The window says what is being read, the way every editor does.
+    fn sync_window_title(&self, window: &mut Window) {
+        let title = match self.tabs.get(self.active) {
+            Some(Surface::Home) | None => crate::APP_NAME.to_string(),
+            Some(surface) => format!("{} — {}", surface.title(), crate::APP_NAME),
+        };
+        window.set_window_title(&title);
     }
 
     /// Keep the welcome screen's "already open" marks true.
@@ -384,12 +479,19 @@ impl Workspace {
                 icon: Some(surface.icon()),
                 active: index == active,
                 closable: index != 0,
+                editor: self
+                    .renaming
+                    .as_ref()
+                    .filter(|renaming| renaming.index == index)
+                    .map(|renaming| self.render_rename(&renaming.input, cx)),
             })
             .collect();
 
         let select_handle = cx.entity().downgrade();
         let close_handle = select_handle.clone();
+        let rename_handle = select_handle.clone();
         let close_shown = shown.clone();
+        let rename_shown = shown.clone();
         tab_strip(
             tabs,
             &self.tab_scroll,
@@ -400,12 +502,43 @@ impl Workspace {
                     .ok();
             },
             move |position, window, cx: &mut App| {
+                let index = rename_shown[position];
+                rename_handle
+                    .update(cx, |workspace, cx| {
+                        workspace.start_rename(index, window, cx)
+                    })
+                    .ok();
+            },
+            move |position, window, cx: &mut App| {
                 let index = close_shown[position];
                 close_handle
                     .update(cx, |workspace, cx| workspace.close(index, window, cx))
                     .ok();
             },
         )
+    }
+}
+
+impl Workspace {
+    /// The name field in place of a chip's title. It sits on the window's
+    /// drag strip, so a press in it selects text instead of moving the window.
+    fn render_rename(&self, input: &Entity<TextInput>, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .occlude()
+            .w_full()
+            .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation()
+            })
+            .on_key_down(
+                cx.listener(|workspace, event: &gpui_kit::KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "escape" {
+                        cx.stop_propagation();
+                        workspace.finish_rename(false, true, window, cx);
+                    }
+                }),
+            )
+            .child(input.clone())
+            .into_any_element()
     }
 }
 
@@ -490,6 +623,38 @@ mod tests {
 
                 assert_eq!(titles(workspace), vec!["Home", "one", "two", "Settings"]);
                 assert_eq!(workspace.active, 3);
+            })
+            .expect("window update");
+    }
+
+    #[gpui_kit::test]
+    fn a_renamed_tab_keeps_its_name_and_a_blank_one_gives_it_back(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace.open_repository("/repos/one".into(), window, cx);
+                let rename = |workspace: &mut Workspace,
+                              text: &str,
+                              save,
+                              window: &mut Window,
+                              cx: &mut Context<Workspace>| {
+                    workspace.start_rename(1, window, cx);
+                    let input = workspace.renaming.as_ref().unwrap().input.clone();
+                    input.update(cx, |input, cx| input.set_text(text.to_string(), window, cx));
+                    workspace.finish_rename(save, true, window, cx);
+                };
+
+                rename(workspace, "  Work  ", true, window, cx);
+                assert_eq!(titles(workspace), vec!["Home", "Work"]);
+                let saved = settings::current(cx).tabs.names.get("/repos/one").cloned();
+                assert_eq!(saved.as_deref(), Some("Work"));
+
+                rename(workspace, "Ignored", false, window, cx);
+                assert_eq!(titles(workspace), vec!["Home", "Work"]);
+
+                rename(workspace, "   ", true, window, cx);
+                assert_eq!(titles(workspace), vec!["Home", "one"]);
+                assert!(settings::current(cx).tabs.names.is_empty());
             })
             .expect("window update");
     }
