@@ -281,7 +281,7 @@ impl HistoryView {
         }));
     }
 
-    /// A toast with how it went. Failures stay until dismissed.
+    /// A toast with how it went.
     pub(super) fn announce(
         &mut self,
         text: impl Into<SharedString>,

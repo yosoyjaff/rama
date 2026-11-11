@@ -22,6 +22,8 @@ pub enum Aim {
     Commit,
     Branch(BranchAim),
     Tag(String),
+    /// A stash entry: it can only be deleted or have its sha copied.
+    Stash,
 }
 
 /// A branch badge, local or remote-tracking.
@@ -234,6 +236,9 @@ pub enum Command {
         text: String,
     },
     Patch {
+        sha: String,
+    },
+    DropStash {
         sha: String,
     },
 }
@@ -484,6 +489,7 @@ impl Command {
                 sha,
                 dir: need(answers, Key::Folder, "A folder")?,
             }),
+            Command::DropStash { sha } => git(GitAction::StashDrop { sha }),
         }
     }
 }
@@ -582,6 +588,9 @@ pub fn path_segment(reference: &str) -> String {
 
 /// The menu for `scene`, top to bottom. Empty groups are left out.
 pub fn menu_for(scene: &Scene) -> Vec<Group> {
+    if scene.aim == Aim::Stash {
+        return stashing(scene);
+    }
     let branch = match &scene.aim {
         Aim::Branch(branch) => Some(branch),
         _ => None,
@@ -604,6 +613,26 @@ pub fn menu_for(scene: &Scene) -> Vec<Group> {
     ];
     groups.retain(|group| !group.is_empty());
     groups
+}
+
+/// A stash is not a commit on a branch: copying its sha and deleting it are
+/// all that make sense.
+fn stashing(scene: &Scene) -> Vec<Group> {
+    let sha = scene.sha.clone();
+    vec![
+        vec![item(
+            Item::new("Copy sha", Command::Copy { text: sha.clone() }).done("Sha copied"),
+        )],
+        vec![item(
+            Item::new("Delete stash", Command::DropStash { sha })
+                .dangerous(
+                    "Delete this stash?".into(),
+                    "The changes kept in it will be lost.",
+                    "Delete",
+                )
+                .done("Stash deleted"),
+        )],
+    ]
 }
 
 fn item(item: Item) -> Entry {
@@ -1319,6 +1348,21 @@ mod tests {
 
     fn git(action: GitAction) -> Result<Outcome, String> {
         Ok(Outcome::Git(Box::new(action)))
+    }
+
+    #[test]
+    fn a_stash_offers_only_copying_and_deleting_it() {
+        let menu = menu_for(&scene(Aim::Stash));
+        let drop = find(&menu, |c| matches!(c, Command::DropStash { .. })).unwrap();
+        assert!(drop.danger());
+        assert_eq!(
+            drop.outcome(&Answers::new()),
+            git(GitAction::StashDrop { sha: SHA.into() })
+        );
+        assert!(!has(&menu, |c| matches!(
+            c,
+            Command::Merge { .. } | Command::Reset { .. }
+        )));
     }
 
     #[test]

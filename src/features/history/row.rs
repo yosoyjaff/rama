@@ -503,7 +503,11 @@ impl HistoryView {
             .as_ref()
             .and_then(|r| r.branch.clone())
             .unwrap_or_default();
-        let target = actions::aim_for_row(&commit.refs, &current_branch);
+        let target = if commit.is_stash {
+            actions::Aim::Stash
+        } else {
+            actions::aim_for_row(&commit.refs, &current_branch)
+        };
         let node = self.graph_cell(index, graph, theme, cx);
         let menu_sha = sha.clone();
         div()

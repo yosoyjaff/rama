@@ -13,6 +13,7 @@
 
 mod file;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -355,6 +356,9 @@ impl Default for Diff {
 pub struct Tabs {
     pub open: Vec<String>,
     pub active: Option<String>,
+    /// Names the user gave tabs, by repository path. A tab without one is
+    /// named after its folder.
+    pub names: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]

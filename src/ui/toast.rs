@@ -2,9 +2,9 @@
 //! own notification stack.
 //!
 //! An action that changes something the window does not otherwise show —
-//! a pull, a push, a stash — says so here, and gets out of the way. A
-//! failure stays until it is dismissed: git's words are often the only
-//! explanation of what to do next.
+//! a pull, a push, a stash — says so here, and gets out of the way. Every
+//! toast leaves on its own; hovering one holds it, so git's words on a
+//! failure can still be read to the end.
 //!
 //! [`show`] takes `&mut App` rather than a window because the code that
 //! learns the outcome (an entity update, a background task's completion)
@@ -20,7 +20,7 @@ use gpui_kit::{Anchor, App};
 pub enum ToastKind {
     /// It worked. Leaves on its own.
     Success,
-    /// It did not. Stays until closed.
+    /// It did not. Leaves on its own too; hovering holds it.
     Error,
 }
 
@@ -49,10 +49,7 @@ fn notification(kind: ToastKind, text: String) -> Notification {
         // the stack stays scannable.
         ToastKind::Success if short => Notification::new().title(text),
         ToastKind::Success => Notification::new().title("Done").message(text),
-        ToastKind::Error => Notification::new()
-            .title("Action failed")
-            .message(text)
-            .autohide(false),
+        ToastKind::Error => Notification::new().title("Action failed").message(text),
     }
     .with_type(match kind {
         ToastKind::Success => NotificationType::Success,

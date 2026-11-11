@@ -11,6 +11,10 @@ use crate::git::Commit;
 use crate::ui::avatar::{author_initials, author_tint};
 use crate::ui::theme::{self, Theme};
 
+/// The tallest the message gets before it scrolls, so a long body does not
+/// push the byline and the files out of the panel.
+const MESSAGE_MAX_HEIGHT: f32 = 160.0;
+
 /// When a commit was written, in local time, as `04/03/2026 @ 10:15`; a
 /// dash if git's date does not parse.
 fn written_at(rfc3339: &str) -> String {
@@ -124,7 +128,13 @@ fn message(commit: &Commit, theme: &Theme) -> AnyElement {
             .child(div().min_w_0().child(SharedString::from(text.to_owned())))
     };
     div()
+        .id(SharedString::from(format!(
+            "panel-commit-message-{}",
+            commit.sha
+        )))
         .flex_none()
+        .max_h(px(MESSAGE_MAX_HEIGHT))
+        .overflow_y_scroll()
         .flex()
         .flex_col()
         .gap(px(6.0))
