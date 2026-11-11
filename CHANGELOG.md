@@ -4,6 +4,19 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.5.1] - 2026-11-11
+
+### Added
+- A double click on a project tab renames it. The name is kept for that
+  repository; leaving it blank brings back the folder's name.
+- Right-clicking a stash, in the history or the sidebar, offers to copy its
+  sha or delete it.
+
+### Fixed
+- Toasts leave on their own, failures included; hovering one holds it.
+- A long commit message scrolls inside the side panel instead of pushing
+  the author and the files out of view.
+
 ## [0.5.0] - 2026-11-06
 
 ### Changed
