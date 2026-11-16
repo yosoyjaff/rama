@@ -1,46 +1,61 @@
-//! The tab strip: fixed-width chips for whatever the pane has open.
+//! The tab strip: a plate for each tab the pane has open.
 //!
-//! One chip is 112×24 with three slots — a leading glyph, the title, and a
-//! trailing slot that is empty at rest and holds the close ✕ on hover. The
-//! slots are fixed so nothing shifts when the pointer crosses a chip, and the
-//! widths are uniform so a strip of five tabs reads as five of the same thing
-//! rather than five different things.
+//! A plate holds a tile with the tab's glyph and its title. Tabs keep their
+//! full width while they fit; when the band runs short they all give way
+//! together, the selected one only down to [`SELECTED_MIN_WIDTH`]. A title
+//! too long for its plate fades out over its last few pixels rather than
+//! ending in an ellipsis. On hover a close ✕ sits over the plate's right end.
 //!
 //! The strip knows nothing about what a tab contains: it takes what to draw
-//! and reports which chip was pressed.
+//! and reports which plate was pressed.
 //!
-//! What does not fit scrolls, with nothing drawn for it — no bar, no shadow:
-//! the wheel moves the chips, and the owner brings the active one into view
-//! with [`reveal`], on the [`gpui_kit::ScrollHandle`] it passes in.
+//! When even the narrowest plates do not fit, the strip scrolls, with nothing
+//! drawn for it — no bar, no shadow: the wheel moves the plates, and the
+//! owner brings the active one into view with [`reveal`], on the
+//! [`gpui_kit::ScrollHandle`] it passes in.
 
 use gpui_kit::{
-    AnyElement, App, ElementId, IntoElement, SharedString, Window, div, prelude::*, px,
+    AnyElement, App, ContentMask, ElementId, IntoElement, SharedString, TextAlign, TextRun, Window,
+    canvas, div, prelude::*, px,
 };
 
 use crate::ui::motion;
-use crate::ui::theme::{Theme, wash};
+use crate::ui::theme::{Theme, hairline, wash};
 use crate::ui::typography::ui_rems;
 
-/// One chip's slot. Fixed, as uniform widths are what let a strip of tabs read
-/// as one control instead of a row of differently-sized buttons.
-pub const CHIP_WIDTH: f32 = 112.0;
-/// The chip's height, matching the toolbar controls beside it.
-pub const CHIP_HEIGHT: f32 = 24.0;
-/// The gap between chips.
-pub const CHIP_GAP: f32 = 4.0;
-/// The leading and trailing slots inside a chip.
-const SLOT_SIZE: f32 = 18.0;
+/// A tab's width while the band has room for every one.
+pub const MAX_WIDTH: f32 = 224.0;
+/// The selected tab shrinks with the others only down to this.
+pub const SELECTED_MIN_WIDTH: f32 = 112.0;
+/// Below this a tab is only its tile, and the strip scrolls instead.
+pub const MIN_WIDTH: f32 = 40.0;
+/// The plate's height, inside the title band.
+pub const PLATE_HEIGHT: f32 = 27.0;
+/// The gap between plates.
+pub const GAP: f32 = 2.0;
+/// The glyph's tile: a touch wider than tall.
+const TILE_WIDTH: f32 = 24.0;
+const TILE_HEIGHT: f32 = 20.0;
+/// The tile sits as far from the plate's left edge as from its top.
+const TILE_INSET: f32 = (PLATE_HEIGHT - TILE_HEIGHT) / 2.0;
+/// Between the tile and the title.
+const TILE_GAP: f32 = 8.0;
+/// The close button, and the room the title leaves for it.
+const CLOSE_SIZE: f32 = 20.0;
+const CLOSE_ROOM: f32 = 26.0;
+/// How far from its end an overflowing title starts to fade.
+const FADE: f32 = 40.0;
 
-/// Scroll the strip just far enough to show chip `index`, and no further.
+/// Scroll the strip just far enough to show plate `index`, and no further.
 ///
-/// The chips are uniform, so where one sits is arithmetic; GPUI's own
-/// `scroll_to_item` measures against bounds from an earlier layout and, when
-/// tabs open in a burst or before the strip has been drawn, leaves the chip
-/// off screen. Before the first frame there is no viewport to measure, so
-/// the move waits for one.
+/// Plates change width as the band does, so where one sits comes from the
+/// last layout. A plate opened since then has none yet; tabs open at the
+/// end, so the strip goes to its end, which layout clamps to the last plate.
+/// Before the first frame there is no viewport at all, and the move waits
+/// for one.
 pub fn reveal(scroll: &gpui_kit::ScrollHandle, index: usize, window: &Window) {
-    let viewport = scroll.bounds().size.width;
-    if viewport <= px(0.0) {
+    let viewport = scroll.bounds();
+    if viewport.size.width <= px(0.0) {
         let scroll = scroll.clone();
         window.on_next_frame(move |window, _| {
             if scroll.bounds().size.width > px(0.0) {
@@ -50,16 +65,24 @@ pub fn reveal(scroll: &gpui_kit::ScrollHandle, index: usize, window: &Window) {
         return;
     }
     let mut offset = scroll.offset();
-    offset.x = reveal_offset(index, f32::from(offset.x), f32::from(viewport)).into();
+    offset.x = match scroll.bounds_for_item(index) {
+        Some(plate) => reveal_offset(
+            f32::from(plate.left() - viewport.left()),
+            f32::from(plate.right() - viewport.left()),
+            f32::from(offset.x),
+            f32::from(viewport.size.width),
+        ),
+        None => -f32::MAX,
+    }
+    .into();
     scroll.set_offset(offset);
 }
 
-/// The horizontal offset that shows chip `index` in a viewport `viewport`
-/// wide, from offset `current`: unchanged if it is already in full view,
-/// else the chip lands flush against the nearer edge.
-fn reveal_offset(index: usize, current: f32, viewport: f32) -> f32 {
-    let left = index as f32 * (CHIP_WIDTH + CHIP_GAP);
-    let right = left + CHIP_WIDTH;
+/// The horizontal offset that shows a plate spanning `left..right` (in the
+/// strip's unscrolled coordinates) in a viewport `viewport` wide, from
+/// offset `current`: unchanged if it is already in full view, else the plate
+/// lands flush against the nearer edge.
+fn reveal_offset(left: f32, right: f32, current: f32, viewport: f32) -> f32 {
     if left + current < 0.0 {
         -left
     } else if right + current > viewport {
@@ -69,14 +92,14 @@ fn reveal_offset(index: usize, current: f32, viewport: f32) -> f32 {
     }
 }
 
-/// What one chip says.
+/// What one tab says.
 pub struct Tab {
-    /// Stable across frames: the chip's identity for hover and click.
+    /// Stable across frames: the tab's identity for hover and click.
     pub id: ElementId,
-    /// Group key for the hover swap inside the chip.
+    /// Group key for the hover swap inside the tab.
     pub group: SharedString,
     pub title: SharedString,
-    /// A glyph path, or `None` for a chip whose title says it all.
+    /// A glyph path for the tile, or `None` for a tab whose title says it all.
     pub icon: Option<&'static str>,
     pub active: bool,
     /// Whether this tab can be closed. The pane's home tab cannot.
@@ -86,12 +109,13 @@ pub struct Tab {
 }
 
 /// Draw the strip. `on_select`, `on_rename` (a double click) and `on_close`
-/// receive the tab's index;
-/// `scroll` is the strip's own offset, which `scroll_to_item(index)` moves
-/// just far enough to show a chip.
+/// receive the tab's index; `scroll` is the strip's own offset, which
+/// [`reveal`] moves just far enough to show a plate. `trailing` follows the
+/// last plate, as close to it as the plates are to each other.
 pub fn tab_strip(
     tabs: Vec<Tab>,
     scroll: &gpui_kit::ScrollHandle,
+    trailing: Option<AnyElement>,
     on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
     on_rename: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
     on_close: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
@@ -101,12 +125,12 @@ pub fn tab_strip(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(CHIP_GAP))
+        .gap(px(GAP))
         .min_w_0()
         .overflow_x_scroll()
         .track_scroll(scroll);
     for (index, tab) in tabs.into_iter().enumerate() {
-        strip = strip.child(chip(
+        strip = strip.child(plate(
             index,
             tab,
             on_select.clone(),
@@ -114,10 +138,12 @@ pub fn tab_strip(
             on_close.clone(),
         ));
     }
-    strip.into_any_element()
+    strip
+        .children(trailing.map(|trailing| div().flex_none().child(trailing)))
+        .into_any_element()
 }
 
-fn chip(
+fn plate(
     index: usize,
     tab: Tab,
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
@@ -130,22 +156,32 @@ fn chip(
     div()
         .id(tab.id)
         .group(group.clone())
-        .h(px(CHIP_HEIGHT))
-        .w(px(CHIP_WIDTH))
-        .flex_none()
-        .pl(px(if tab.icon.is_some() { 4.0 } else { 9.0 }))
-        .pr(px(4.0))
+        .relative()
+        .h(px(PLATE_HEIGHT))
+        // Every plate starts at the full width and gives way at the same
+        // rate, so a crowded band splits evenly between them.
+        .w(px(MAX_WIDTH))
+        .flex_shrink(1.0)
+        .min_w(px(if tab.active {
+            SELECTED_MIN_WIDTH
+        } else {
+            MIN_WIDTH
+        }))
+        .overflow_hidden()
+        .pl(px(if tab.icon.is_some() { TILE_INSET } else { 10.0 }))
+        .pr(px(if closable { CLOSE_ROOM } else { 8.0 }))
         .rounded(px(6.0))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(3.0))
+        .gap(px(TILE_GAP))
         .cursor_pointer()
         // Never `occlude()`: a blocking hitbox ends the hit test, and the
-        // strip behind the chips would stop scrolling under the wheel.
-        .when(tab.active, |chip| chip.bg(wash(0.10)))
-        .when(!tab.active, |chip| {
-            chip.bg(motion::fade_color(&fade, wash(0.0), wash(0.06)))
+        // strip behind the plates would stop scrolling under the wheel.
+        .when(tab.active, |plate| plate.bg(wash(0.10)))
+        .when(!tab.active, |plate| {
+            plate
+                .bg(motion::fade_color(&fade, wash(0.04), wash(0.07)))
                 .on_hover(motion::on_hover_fade(&fade))
         })
         .on_click(move |event, window, cx| {
@@ -156,99 +192,161 @@ fn chip(
                 on_select(index, window, cx);
             }
         })
-        .children(tab.icon.map(|path| {
-            div()
-                .flex_none()
-                .size(px(SLOT_SIZE))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(TabGlyph {
-                    path,
-                    active: tab.active,
-                })
-        }))
+        .children(tab.icon.map(|path| TabTile { path }))
         .child(
             div()
                 .min_w_0()
                 .flex_1()
-                .truncate()
-                .text_size(ui_rems(11.5))
+                .h(px(TILE_HEIGHT))
+                .flex()
+                .items_center()
+                .text_size(ui_rems(13.0))
                 .map(|slot| match tab.editor {
                     Some(editor) => slot.child(editor),
                     None => slot.child(TabTitle {
                         title: tab.title,
                         active: tab.active,
+                        group: group.clone(),
                     }),
                 }),
         )
-        // The trailing slot is permanently reserved, so a chip never changes
-        // width when the pointer arrives: empty at rest, the ✕ on hover.
-        .child(
-            div()
-                .id(("tab-strip-close", index))
-                .flex_none()
-                .size(px(SLOT_SIZE))
-                .rounded(px(4.0))
-                .when(closable, |slot| {
-                    slot.hover(|style| style.bg(wash(0.12)))
-                        .on_click(move |_, window, cx| {
-                            cx.stop_propagation();
-                            on_close(index, window, cx);
-                        })
-                        .child(
-                            div()
-                                .size_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .opacity(0.0)
-                                .group_hover(group, |style| style.opacity(1.0))
-                                .child(CloseGlyph),
-                        )
-                }),
-        )
+        // Over the plate, not beside the title: it shows on hover and takes
+        // no room from the title the rest of the time.
+        .when(closable, |plate| {
+            plate.child(
+                div()
+                    .id(("tab-strip-close", index))
+                    .absolute()
+                    .right(px(4.0))
+                    .top(px((PLATE_HEIGHT - CLOSE_SIZE) / 2.0))
+                    .size(px(CLOSE_SIZE))
+                    .rounded(px(4.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .opacity(0.0)
+                    .group_hover(group, |style| style.opacity(1.0))
+                    .hover(|style| style.bg(wash(0.12)))
+                    .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
+                        on_close(index, window, cx);
+                    })
+                    .child(CloseGlyph),
+            )
+        })
         .into_any_element()
 }
 
-/// The chip's leading glyph, tinted by the theme at render time.
+/// The tab's glyph on a small raised tile.
 #[derive(IntoElement)]
-struct TabGlyph {
+struct TabTile {
     path: &'static str,
-    active: bool,
 }
 
-impl RenderOnce for TabGlyph {
+impl RenderOnce for TabTile {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::of(cx);
-        crate::ui::icons::icon(self.path)
-            .size(px(12.0))
-            .text_color(if self.active {
-                theme.text_muted
-            } else {
-                theme.text_muted.opacity(0.7)
-            })
+        div()
+            .flex_none()
+            .w(px(TILE_WIDTH))
+            .h(px(TILE_HEIGHT))
+            .rounded(px(5.0))
+            .bg(theme.surface_raised)
+            .border_1()
+            .border_color(hairline(0.10))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                crate::ui::icons::icon(self.path)
+                    .size(px(14.0))
+                    .text_color(theme.text),
+            )
     }
 }
 
+/// The title, dim unless its tab is selected or under the pointer. Painted
+/// by hand so an overflowing one fades out instead of ending in an ellipsis.
 #[derive(IntoElement)]
 struct TabTitle {
     title: SharedString,
     active: bool,
+    group: SharedString,
 }
 
 impl RenderOnce for TabTitle {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::of(cx);
+        let lit = theme.text;
         div()
-            .truncate()
-            .text_color(if self.active {
-                theme.text
-            } else {
-                theme.text_muted
-            })
-            .child(self.title)
+            .size_full()
+            .text_color(if self.active { lit } else { theme.text_muted })
+            .group_hover(self.group, move |style| style.text_color(lit))
+            .child(faded_label(self.title))
     }
+}
+
+/// One line of text in the inherited style. Short text is left as is; text
+/// wider than the box fades to nothing over its last [`FADE`] pixels.
+fn faded_label(text: SharedString) -> impl IntoElement {
+    canvas(
+        move |bounds, window, _| {
+            let style = window.text_style();
+            let font_size = style.font_size.to_pixels(window.rem_size());
+            let run = TextRun {
+                len: text.len(),
+                font: style.font(),
+                color: style.color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let line = window.text_system().shape_line(
+                text.clone(),
+                font_size,
+                std::slice::from_ref(&run),
+                None,
+            );
+            if line.width() <= bounds.size.width || bounds.size.width <= px(0.0) {
+                return line;
+            }
+            // One run per character, each dimmed by how close its centre
+            // sits to the box's end.
+            let runs: Vec<TextRun> = text
+                .char_indices()
+                .map(|(ix, ch)| {
+                    let centre =
+                        (line.x_for_index(ix) + line.x_for_index(ix + ch.len_utf8())) / 2.0;
+                    let mut run = run.clone();
+                    run.len = ch.len_utf8();
+                    run.color.a *= fade_alpha(f32::from(bounds.size.width), f32::from(centre));
+                    run
+                })
+                .collect();
+            window
+                .text_system()
+                .shape_line(text.clone(), font_size, &runs, None)
+        },
+        |bounds, line, window, cx| {
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                let _ = line.paint(
+                    bounds.origin,
+                    bounds.size.height,
+                    TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                );
+            });
+        },
+    )
+    .size_full()
+}
+
+/// The opacity of a glyph centred at `x` in a box `width` wide: full until
+/// the last [`FADE`] pixels, then down to nothing at the edge.
+fn fade_alpha(width: f32, x: f32) -> f32 {
+    ((width - x) / FADE).clamp(0.0, 1.0)
 }
 
 #[derive(IntoElement)]
@@ -266,29 +364,27 @@ impl RenderOnce for CloseGlyph {
 mod tests {
     use super::*;
 
-    const STEP: f32 = CHIP_WIDTH + CHIP_GAP;
-
     #[test]
-    fn a_chip_already_in_view_does_not_move_the_strip() {
-        assert_eq!(reveal_offset(2, 0.0, 600.0), 0.0);
-        assert_eq!(reveal_offset(10, -STEP * 8.0, 600.0), -STEP * 8.0);
+    fn a_plate_already_in_view_does_not_move_the_strip() {
+        assert_eq!(reveal_offset(80.0, 192.0, 0.0, 600.0), 0.0);
+        assert_eq!(reveal_offset(900.0, 940.0, -500.0, 600.0), -500.0);
     }
 
     #[test]
-    fn a_chip_past_the_right_edge_lands_against_it() {
-        let offset = reveal_offset(49, 0.0, 600.0);
-        assert_eq!(49.0 * STEP + CHIP_WIDTH + offset, 600.0);
+    fn a_plate_past_the_right_edge_lands_against_it() {
+        let offset = reveal_offset(2000.0, 2112.0, 0.0, 600.0);
+        assert_eq!(2112.0 + offset, 600.0);
     }
 
     #[test]
-    fn a_chip_past_the_left_edge_lands_against_it() {
-        assert_eq!(reveal_offset(3, -STEP * 20.0, 600.0), -STEP * 3.0);
+    fn a_plate_past_the_left_edge_lands_against_it() {
+        assert_eq!(reveal_offset(120.0, 232.0, -900.0, 600.0), -120.0);
     }
 
     #[test]
-    fn a_strip_that_fits_never_scrolls() {
-        for index in 0..5 {
-            assert_eq!(reveal_offset(index, 0.0, 600.0), 0.0);
-        }
+    fn a_title_fades_only_over_its_last_pixels() {
+        assert_eq!(fade_alpha(200.0, 100.0), 1.0);
+        assert_eq!(fade_alpha(200.0, 180.0), 0.5);
+        assert_eq!(fade_alpha(200.0, 230.0), 0.0);
     }
 }
