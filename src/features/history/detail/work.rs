@@ -14,7 +14,7 @@ use super::listing::Staging;
 use super::{DetailPanel, PanelEvent, Shown};
 use crate::git::actions::GitAction;
 use crate::git::conflicts::{self, OperationState, OperationStatus};
-use crate::git::{DiffFileSummary, GitStatus};
+use crate::git::{DiffFileSummary, GitStatus, GitStatusEntry};
 use crate::ui::popover::Layer;
 
 /// Summaries up to this long show whole in most tools; the counter warns
@@ -82,7 +82,8 @@ pub(super) struct Worktree {
     pub folded: HashSet<Section>,
     pub amend: bool,
     pub job: Job,
-    pub asking_to_discard: bool,
+    /// What the discard dialog is asking about, while it is open.
+    pub asking_to_discard: Option<Discarding>,
     /// The last thing that went wrong, or that git had to say.
     pub problem: Option<SharedString>,
     /// The message git prepared for the operation, as (summary, body), for
@@ -141,7 +142,45 @@ impl Worktree {
     }
 }
 
+/// What a discard throws away: every change, or one file's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Discarding {
+    All,
+    File(String),
+}
+
+impl Worktree {
+    /// The entries `which` would throw away.
+    pub fn to_discard(&self, which: &Discarding) -> Vec<&GitStatusEntry> {
+        let entries = self.status.as_ref().map_or(&[][..], |s| &s.entries);
+        entries
+            .iter()
+            .filter(|entry| match which {
+                Discarding::All => true,
+                Discarding::File(path) => &entry.path == path,
+            })
+            .collect()
+    }
+}
+
+/// The edit that throws `entries` away. A rename takes its old path back
+/// with it, or the file would be gone under both names.
+pub(super) fn discard_edit(entries: &[&GitStatusEntry]) -> Edit {
+    let (mut tracked, mut untracked) = (Vec::new(), Vec::new());
+    for entry in entries {
+        match entry.untracked {
+            true => untracked.push(entry.path.clone()),
+            false => {
+                tracked.push(entry.path.clone());
+                tracked.extend(entry.old_path.clone());
+            }
+        }
+    }
+    Edit::Discard { tracked, untracked }
+}
+
 /// A change to some files of the working tree.
+#[derive(Clone)]
 pub(super) enum Edit {
     Stage(Vec<String>),
     Unstage(Vec<String>),
@@ -458,6 +497,44 @@ impl DetailPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discarding_one_file_leaves_the_others_and_brings_back_a_rename() {
+        let entry = |path: &str, old: Option<&str>, untracked| GitStatusEntry {
+            path: path.into(),
+            old_path: old.map(Into::into),
+            untracked,
+            ..Default::default()
+        };
+        let tree = Worktree {
+            status: Some(GitStatus {
+                entries: vec![
+                    entry("new.txt", Some("old.txt"), false),
+                    entry("edit.txt", None, false),
+                    entry("scratch.txt", None, true),
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let edit = |which| match discard_edit(&tree.to_discard(&which)) {
+            Edit::Discard { tracked, untracked } => (tracked, untracked),
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            edit(Discarding::File("new.txt".into())),
+            (vec!["new.txt".into(), "old.txt".into()], vec![])
+        );
+        assert_eq!(
+            edit(Discarding::File("scratch.txt".into())),
+            (vec![], vec!["scratch.txt".into()])
+        );
+        assert_eq!(edit(Discarding::All).0.len(), 3);
+        assert!(
+            tree.to_discard(&Discarding::File("gone.txt".into()))
+                .is_empty()
+        );
+    }
 
     #[test]
     fn each_operation_offers_its_way_out() {

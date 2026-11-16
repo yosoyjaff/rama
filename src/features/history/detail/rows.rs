@@ -9,6 +9,7 @@ use gpui_kit::{
 };
 
 use super::listing::{Line, file_name, folder_of};
+use super::work::Discarding;
 use super::{Change, DetailPanel, PanelEvent, Shown};
 use crate::git::DiffFileSummary;
 use crate::ui::chrome::{SEGMENT_INNER_RADIUS, SEGMENT_RADIUS};
@@ -20,6 +21,8 @@ use crate::ui::typography::ui_rems;
 pub(super) const LINE_HEIGHT: f32 = 26.0;
 /// How far each level of the tree steps in.
 const STEP_IN: f32 = 12.0;
+/// The button on a working-tree file that throws its changes away.
+const DISCARD_SIZE: f32 = 18.0;
 
 /// The lists files are shown in. Each keeps its own element ids, since a
 /// file can be in two at once, and opens its files its own way.
@@ -213,12 +216,42 @@ impl DetailPanel {
                 .children(lines(file.deletions, "−", theme.danger))
         });
         let path = file.path.clone();
+        let row = SharedString::from(format!("panel-{}-file-{}", list.key(), file.path));
+        // The working tree's files can each be thrown away on their own; a
+        // commit's cannot.
+        let discard = (list != List::Commit && !self.worktree.busy()).then(|| {
+            let danger = theme.danger;
+            let target = file.path.clone();
+            let button = SharedString::from(format!("{row}-discard"));
+            div()
+                .id(button.clone())
+                .group(button.clone())
+                .flex_none()
+                .size(px(DISCARD_SIZE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(4.0))
+                .opacity(0.0)
+                .group_hover(row.clone(), |style| style.opacity(1.0))
+                .hover(move |style| style.bg(danger.opacity(0.1)))
+                .child(
+                    icons::icon(icons::TRASH_BIN_MINIMALISTIC)
+                        .size(px(12.0))
+                        .flex_none()
+                        .text_color(theme.text_muted)
+                        .group_hover(button, move |style| style.text_color(danger)),
+                )
+                .tooltip(tip("Discard changes"))
+                .on_click(cx.listener(move |panel, _, _, cx| {
+                    cx.stop_propagation();
+                    panel.worktree.asking_to_discard = Some(Discarding::File(target.clone()));
+                    cx.notify();
+                }))
+        });
         div()
-            .id(SharedString::from(format!(
-                "panel-{}-file-{}",
-                list.key(),
-                file.path
-            )))
+            .id(row.clone())
+            .group(row)
             .h(px(LINE_HEIGHT))
             .flex()
             .items_center()
@@ -243,6 +276,7 @@ impl DetailPanel {
                     .child(name),
             )
             .children(counts)
+            .children(discard)
             .tooltip(tip(hint))
             .on_click(cx.listener(move |panel, _, _, cx| {
                 cx.stop_propagation();

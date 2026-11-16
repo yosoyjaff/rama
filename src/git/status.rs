@@ -332,4 +332,22 @@ mod tests {
         assert!(repo.path().join("keep.txt").exists());
         assert!(!repo.path().join("drop.txt").exists());
     }
+
+    #[test]
+    fn discarding_a_staged_rename_or_new_file_undoes_it() {
+        let repo = TestRepo::new();
+        repo.commit("first");
+        repo.git(&["mv", "log.txt", "moved.txt"]);
+        repo.write("new.txt", "n\n");
+        stage(repo.path(), &strings(&["new.txt"])).unwrap();
+
+        discard(repo.path(), &strings(&["moved.txt", "log.txt"]), &[]).unwrap();
+        assert!(repo.path().join("log.txt").exists(), "the old name is back");
+        assert!(!repo.path().join("moved.txt").exists());
+        assert!(repo.path().join("new.txt").exists(), "only what was given");
+
+        discard(repo.path(), &strings(&["new.txt"]), &[]).unwrap();
+        assert!(!repo.path().join("new.txt").exists());
+        assert!(status(repo.path()).unwrap().entries.is_empty());
+    }
 }
