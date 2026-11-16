@@ -52,9 +52,21 @@ impl Shell {
     /// for — it is the width the window is not using for anything else, and a
     /// second bar under it would cost a row of graph for nothing.
     fn render_title_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        // New tabs open from right after the last one, as close to it as
+        // the tabs are to each other.
+        let open_project = self
+            .render_band_button(
+                "shell-open-project",
+                crate::ui::icons::PLUS,
+                "Open another project",
+                false,
+                true,
+                |workspace, window, cx| workspace.go_home(window, cx),
+            )
+            .into_any_element();
         let (strip, home_active, settings_active) = self.workspace.update(cx, |workspace, cx| {
             (
-                workspace.render_tab_strip(cx),
+                workspace.render_tab_strip(Some(open_project), cx),
                 workspace.home_active(),
                 workspace.settings_active(),
             )
@@ -70,7 +82,7 @@ impl Shell {
                 crate::ui::icons::HOME_01,
                 "Home",
                 home_active,
-                cx,
+                false,
                 |workspace, window, cx| workspace.go_home(window, cx),
             ))
             .child(self.render_band_button(
@@ -78,7 +90,7 @@ impl Shell {
                 crate::ui::icons::SETTINGS_01,
                 "Settings",
                 settings_active,
-                cx,
+                false,
                 |workspace, window, cx| workspace.open_settings(window, cx),
             ))
             // A rule between the two places that
@@ -91,15 +103,7 @@ impl Shell {
                     .flex_none()
                     .bg(crate::ui::theme::Theme::of(cx).border),
             )
-            .child(div().flex().min_w_0().child(strip))
-            .child(self.render_band_button(
-                "shell-open-project",
-                crate::ui::icons::PLUS,
-                "Open another project",
-                false,
-                cx,
-                |workspace, window, cx| workspace.go_home(window, cx),
-            ));
+            .child(div().flex().min_w_0().child(strip));
         AppTitleBar::new().content(content)
     }
 
@@ -114,13 +118,17 @@ impl Shell {
         icon: &'static str,
         tooltip: &'static str,
         active: bool,
-        _cx: &mut Context<Self>,
+        plate: bool,
         action: fn(&mut Workspace, &mut Window, &mut Context<Workspace>),
     ) -> impl IntoElement + use<> {
         let workspace = self.workspace.clone();
         div()
             .id(id)
-            .size(px(24.))
+            .size(px(if plate {
+                crate::ui::tab_strip::PLATE_HEIGHT
+            } else {
+                24.
+            }))
             .flex_none()
             .flex()
             .items_center()
@@ -134,10 +142,11 @@ impl Shell {
             .bg(if active {
                 crate::ui::theme::wash(0.10)
             } else {
+                // A plate, like the tabs it follows; a bare glyph otherwise.
                 crate::ui::motion::fade_color(
                     id,
-                    crate::ui::theme::wash(0.0),
-                    crate::ui::theme::wash(0.11),
+                    crate::ui::theme::wash(if plate { 0.04 } else { 0.0 }),
+                    crate::ui::theme::wash(if plate { 0.07 } else { 0.11 }),
                 )
             })
             .on_hover(crate::ui::motion::on_hover_fade(id))

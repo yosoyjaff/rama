@@ -465,7 +465,11 @@ impl Workspace {
     /// The strip of open projects, for the window's title band. Home and the
     /// settings are reached from their own buttons before it, so the strip is
     /// only what was opened.
-    pub fn render_tab_strip(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub fn render_tab_strip(
+        &mut self,
+        trailing: Option<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let active = self.active;
         let shown = self.strip_indices();
         let tabs: Vec<Tab> = shown
@@ -495,6 +499,7 @@ impl Workspace {
         tab_strip(
             tabs,
             &self.tab_scroll,
+            trailing,
             move |position, window, cx: &mut App| {
                 let index = shown[position];
                 select_handle
@@ -577,7 +582,7 @@ mod tests {
     impl Render for StripHost {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             self.0
-                .update(cx, |workspace, cx| workspace.render_tab_strip(cx))
+                .update(cx, |workspace, cx| workspace.render_tab_strip(None, cx))
         }
     }
 
@@ -831,7 +836,7 @@ mod tests {
         // And the strip that switches between them.
         visual.update(|_, cx| {
             workspace.update(cx, |workspace, cx| {
-                let _ = workspace.render_tab_strip(cx);
+                let _ = workspace.render_tab_strip(None, cx);
             })
         });
     }
