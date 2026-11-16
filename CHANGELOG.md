@@ -4,6 +4,22 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.6.0] - 2026-11-16
+
+### Added
+- Each file in the working tree's staged and unstaged lists can be discarded
+  on its own, from a trash button on its row. Rama asks first; Discard All
+  stays.
+
+### Changed
+- Project tabs are plates with the project's icon on a small tile. They share
+  the title band when it runs short, the selected one staying readable, and a
+  long name fades out instead of ending in an ellipsis. The + button sits
+  right after the last tab.
+
+### Fixed
+- Discarding a renamed file brings its old name back.
+
 ## [0.5.1] - 2026-11-11
 
 ### Added
