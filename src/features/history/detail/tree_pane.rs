@@ -10,7 +10,9 @@ use gpui_kit::{
 };
 
 use super::rows::{LINE_HEIGHT, List, dimmed_folder, tip};
-use super::work::{ConflictMenu, Edit, Job, SUMMARY_GUIDE, Section, way_out};
+use super::work::{
+    ConflictMenu, Discarding, Edit, Job, SUMMARY_GUIDE, Section, discard_edit, way_out,
+};
 use super::{DetailPanel, PanelEvent};
 use crate::git::DiffFileSummary;
 use crate::git::actions::GitAction;
@@ -230,7 +232,7 @@ impl DetailPanel {
                     .cursor_pointer()
                     .hover(move |style| style.bg(danger.opacity(0.1)).text_color(danger))
                     .on_click(cx.listener(|panel, _, _, cx| {
-                        panel.worktree.asking_to_discard = true;
+                        panel.worktree.asking_to_discard = Some(Discarding::All);
                         cx.notify();
                     }))
             });
@@ -633,34 +635,41 @@ impl DetailPanel {
         row.child(commit).into_any_element()
     }
 
-    /// Asking first: throwing every change away cannot be undone.
+    /// Asking first: throwing changes away cannot be undone.
     fn discard_dialog(
         &self,
         theme: &Theme,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.worktree.asking_to_discard {
-            return None;
-        }
-        let entries = self
-            .worktree
-            .status
-            .as_ref()
-            .map_or(&[][..], |status| &status.entries);
-        let (untracked, tracked): (Vec<_>, Vec<_>) =
-            entries.iter().partition(|entry| entry.untracked);
-        let tracked: Vec<String> = tracked.into_iter().map(|e| e.path.clone()).collect();
-        let untracked: Vec<String> = untracked.into_iter().map(|e| e.path.clone()).collect();
-        let body = match entries.len() {
-            1 => "1 file goes back to its last commit".to_owned(),
-            n => format!("{n} files go back to their last commit"),
-        } + match untracked.is_empty() {
-            true => ". This cannot be undone.",
-            false => ", and new files are deleted. This cannot be undone.",
+        let which = self.worktree.asking_to_discard.clone()?;
+        let entries = self.worktree.to_discard(&which);
+        let untracked = entries.iter().any(|entry| entry.untracked);
+        let edit = discard_edit(&entries);
+        let (title, confirm, body) = match &which {
+            Discarding::All => (
+                "Discard all changes?".to_owned(),
+                "Discard All",
+                match entries.len() {
+                    1 => "1 file goes back to its last commit".to_owned(),
+                    n => format!("{n} files go back to their last commit"),
+                } + match untracked {
+                    false => ". This cannot be undone.",
+                    true => ", and new files are deleted. This cannot be undone.",
+                },
+            ),
+            Discarding::File(path) => (
+                format!("Discard changes to {}?", super::listing::file_name(path)),
+                "Discard",
+                match untracked {
+                    false => "It goes back to its last commit, staged changes included. This cannot be undone.",
+                    true => "It is new, so it is deleted. This cannot be undone.",
+                }
+                .to_owned(),
+            ),
         };
         let close = |panel: &mut Self, cx: &mut Context<Self>| {
-            panel.worktree.asking_to_discard = false;
+            panel.worktree.asking_to_discard = None;
             cx.notify();
         };
         let buttons = div()
@@ -674,12 +683,11 @@ impl DetailPanel {
                     .on_click(cx.listener(move |panel, _, _, cx| close(panel, cx))),
             )
             .child(
-                popover::btn_danger(theme, "Discard All")
+                popover::btn_danger(theme, confirm)
                     .id("panel-discard-confirm")
                     .on_click(cx.listener(move |panel, _, _, cx| {
                         close(panel, cx);
-                        let (tracked, untracked) = (tracked.clone(), untracked.clone());
-                        panel.edit(Edit::Discard { tracked, untracked }, cx);
+                        panel.edit(edit.clone(), cx);
                     })),
             );
         let card = popover::dialog_card(theme)
@@ -689,7 +697,7 @@ impl DetailPanel {
                     close(panel, cx);
                 }
             }))
-            .child(popover::dialog_title(theme, "Discard all changes?"))
+            .child(popover::dialog_title(theme, &title))
             .child(div().mt(px(6.0)).child(popover::dialog_body(theme, body)))
             .child(buttons);
         Some(popover::modal(
