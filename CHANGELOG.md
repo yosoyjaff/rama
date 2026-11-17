@@ -4,6 +4,17 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.8.0] - 2026-11-17
+
+### Added
+- Project tabs can be grouped. A right click on a tab adds it to a new group
+  or moves it to another; a right click on a group renames it, changes its
+  colour, ungroups it or closes its tabs.
+- Down the sidebar, a Groups section lists each group as a heading over its
+  tabs; a click folds it. Its button makes a new, empty group.
+- Across the top, a group is one tab that opens a list of its projects, and
+  shows the one on screen.
+
 ## [0.7.0] - 2026-11-16
 
 ### Added
