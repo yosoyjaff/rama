@@ -140,7 +140,7 @@ impl Welcome {
     }
 
     /// Ask the platform for a folder, then open whatever it points at.
-    fn pick_repository(&mut self, cx: &mut Context<Self>) {
+    pub fn pick_repository(&mut self, cx: &mut Context<Self>) {
         if self.busy || self.picking {
             return;
         }

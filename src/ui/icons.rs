@@ -46,6 +46,7 @@ macro_rules! glyphs {
 glyphs! {
     ALERT_02 = "alert-02",
     ALT_ARROW_DOWN = "alt-arrow-down",
+    ALT_ARROW_LEFT = "alt-arrow-left",
     ALT_ARROW_RIGHT = "alt-arrow-right",
     ALT_ARROW_UP = "alt-arrow-up",
     ARCHIVE_04 = "archive-04",

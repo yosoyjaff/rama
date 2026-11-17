@@ -9,11 +9,21 @@
 //! tab strip the title bar's wide slot. Anything else of that kind is composed
 //! here, in this `render`.
 
+use crate::features::history::FindCommits;
 use crate::features::workspace::Workspace;
 use crate::keymap;
+use crate::settings::TabSide;
 use crate::ui::AppTitleBar;
 use gpui_kit::component::{ActiveTheme, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+
+/// The tabs' sidebar, when they run down a side instead of across the band.
+const TAB_COLUMN_WIDTH: f32 = 200.;
+const TAB_COLUMN_PAD: f32 = 8.;
+/// The column's heading, and the + at its end.
+const SECTION_HEIGHT: f32 = 28.;
+const SECTION_BUTTON: f32 = 20.;
 
 pub struct Shell {
     focus_handle: FocusHandle,
@@ -52,24 +62,13 @@ impl Shell {
     /// for — it is the width the window is not using for anything else, and a
     /// second bar under it would cost a row of graph for nothing.
     fn render_title_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        // New tabs open from right after the last one, as close to it as
-        // the tabs are to each other.
-        let open_project = self
-            .render_band_button(
-                "shell-open-project",
-                crate::ui::icons::PLUS,
-                "Open another project",
-                false,
-                true,
-                |workspace, window, cx| workspace.go_home(window, cx),
-            )
-            .into_any_element();
-        let (strip, home_active, settings_active) = self.workspace.update(cx, |workspace, cx| {
-            (
-                workspace.render_tab_strip(Some(open_project), cx),
-                workspace.home_active(),
-                workspace.settings_active(),
-            )
+        // The settings are a place of their own: no tabs while they are open,
+        // and their rail's Back to app is the way out.
+        let settings_open = self.workspace.read(cx).settings_active();
+        let across = crate::settings::current(cx).look.tabs == TabSide::Top && !settings_open;
+        let strip = across.then(|| self.render_tabs(false, cx));
+        let (home_active, settings_active) = self.workspace.update(cx, |workspace, _| {
+            (workspace.home_active(), workspace.settings_active())
         });
         let content = div()
             .flex()
@@ -95,16 +94,125 @@ impl Shell {
             ))
             // A rule between the two places that
             // are always there, apart from the projects that were opened.
+            .when_some(strip, |band, strip| {
+                band.child(
+                    div()
+                        .mx(px(4.))
+                        .w(px(1.))
+                        .h(px(18.))
+                        .flex_none()
+                        .bg(crate::ui::theme::Theme::of(cx).border),
+                )
+                .child(div().flex().min_w_0().child(strip))
+            });
+        // With the tabs down a side the band holds only Home and Settings,
+        // and a rule before the window buttons would part nothing.
+        let side_tabs = crate::settings::current(cx).look.tabs != TabSide::Top;
+        AppTitleBar::new()
+            .content(content)
+            .when(side_tabs, |bar| bar.without_rule())
+    }
+
+    /// The open projects' tabs, across the band or down a `column`, with
+    /// the button that opens another right after the last one, as close to
+    /// it as the tabs are to each other.
+    fn render_tabs(&mut self, column: bool, cx: &mut Context<Self>) -> AnyElement {
+        // Across the band the button follows the last tab; a column has it
+        // in its heading instead.
+        let open_project = (!column).then(|| {
+            self.render_band_button(
+                "shell-open-project",
+                crate::ui::icons::PLUS,
+                "Open another project",
+                false,
+                true,
+                |workspace, _, cx| workspace.pick_project(cx),
+            )
+            .into_any_element()
+        });
+        self.workspace.update(cx, |workspace, cx| {
+            workspace.render_tab_strip(open_project, column, cx)
+        })
+    }
+
+    /// The + at the end of the column's heading: a quiet glyph that lights
+    /// up under the pointer.
+    fn render_open_project_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = crate::ui::theme::Theme::of(cx);
+        let (rest, lit) = (theme.text_muted, theme.text);
+        let workspace = self.workspace.clone();
+        let id = "shell-open-project";
+        div()
+            .id(id)
+            .group(id)
+            .size(px(SECTION_BUTTON))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .hover(|style| style.bg(crate::ui::theme::wash(0.10)))
+            .tooltip(crate::ui::tip::tip("Open project"))
+            .on_click(move |_, _, cx| {
+                workspace.update(cx, |workspace, cx| workspace.pick_project(cx));
+            })
+            .child(
+                crate::ui::icons::icon(crate::ui::icons::PLUS)
+                    .flex_none()
+                    .size(px(14.))
+                    .text_color(rest)
+                    .group_hover(id, move |style| style.text_color(lit)),
+            )
+            .into_any_element()
+    }
+
+    /// The tabs as a sidebar down one edge of the window, under the band.
+    /// It meets the window's bottom corner on its side, so it rounds it.
+    fn render_tab_column(
+        &mut self,
+        side: TabSide,
+        corner: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let strip = self.render_tabs(true, cx);
+        let theme = crate::ui::theme::Theme::of(cx);
+        div()
+            .flex_none()
+            .w(px(TAB_COLUMN_WIDTH))
+            .h_full()
+            .flex()
+            .flex_col()
+            .px(px(TAB_COLUMN_PAD))
+            .pt(px(4.))
+            .pb(px(TAB_COLUMN_PAD))
+            .bg(theme.surface)
+            .border_color(theme.border.opacity(0.6))
+            .map(|column| match side {
+                TabSide::Right => column.border_l_1().rounded_br(px(corner)),
+                _ => column.border_r_1().rounded_bl(px(corner)),
+            })
+            // A section label, with the button that opens another project
+            // at its end.
             .child(
                 div()
-                    .mx(px(4.))
-                    .w(px(1.))
-                    .h(px(18.))
+                    .h(px(SECTION_HEIGHT))
+                    // The label lines up with the rows' glyphs; the + sits
+                    // where their close buttons do, 4px from the edge.
+                    .pl(px(8.))
+                    .pr(px(4.))
                     .flex_none()
-                    .bg(crate::ui::theme::Theme::of(cx).border),
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .text_size(crate::ui::typography::ui_rems(12.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_muted)
+                    .child(div().flex_1().child("Projects"))
+                    .child(self.render_open_project_button(cx)),
             )
-            .child(div().flex().min_w_0().child(strip));
-        AppTitleBar::new().content(content)
+            .child(strip)
+            .into_any_element()
     }
 
     /// A control on the title band.
@@ -195,6 +303,11 @@ impl Render for Shell {
             // The scope an application-wide binding is bound in. Its handlers
             // go on this element, which is the one that declares the context.
             .key_context(keymap::CONTEXT)
+            .on_action(cx.listener(|shell, _: &FindCommits, window, cx| {
+                shell
+                    .workspace
+                    .update(cx, |workspace, cx| workspace.find(window, cx));
+            }))
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(cx.theme().background)
@@ -215,12 +328,21 @@ impl Render for Shell {
             // flex item keeps its content-based minimum height until told
             // otherwise, and a view that scrolls needs the row to resolve
             // against the window instead of against its own content.
-            .child(
-                div()
+            .child({
+                let side = crate::settings::current(cx).look.tabs;
+                let settings_open = self.workspace.read(cx).settings_active();
+                let column = (side != TabSide::Top && !settings_open)
+                    .then(|| self.render_tab_column(side, corner, cx));
+                let workspace = div()
                     .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(self.workspace.clone()),
-            )
+                    .min_w_0()
+                    .h_full()
+                    .child(self.workspace.clone());
+                let row = div().flex_1().min_h_0().w_full().flex().flex_row();
+                match side {
+                    TabSide::Right => row.child(workspace).children(column),
+                    _ => row.children(column).child(workspace),
+                }
+            })
     }
 }

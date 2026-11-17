@@ -1,6 +1,6 @@
 //! The tab strip: a plate for each tab the pane has open.
 //!
-//! A plate holds a tile with the tab's glyph and its title. Tabs keep their
+//! A plate holds the tab's glyph and its title. Tabs keep their
 //! full width while they fit; when the band runs short they all give way
 //! together, the selected one only down to [`SELECTED_MIN_WIDTH`]. A title
 //! too long for its plate fades out over its last few pixels rather than
@@ -8,6 +8,8 @@
 //!
 //! The strip knows nothing about what a tab contains: it takes what to draw
 //! and reports which plate was pressed.
+//!
+//! The same plates can instead stack down a column, as a sidebar.
 //!
 //! When even the narrowest plates do not fit, the strip scrolls, with nothing
 //! drawn for it — no bar, no shadow: the wheel moves the plates, and the
@@ -20,26 +22,25 @@ use gpui_kit::{
 };
 
 use crate::ui::motion;
-use crate::ui::theme::{Theme, hairline, wash};
+use crate::ui::theme::{Theme, wash};
 use crate::ui::typography::ui_rems;
 
 /// A tab's width while the band has room for every one.
 pub const MAX_WIDTH: f32 = 224.0;
 /// The selected tab shrinks with the others only down to this.
 pub const SELECTED_MIN_WIDTH: f32 = 112.0;
-/// Below this a tab is only its tile, and the strip scrolls instead.
+/// Below this a tab is only its glyph, and the strip scrolls instead.
 pub const MIN_WIDTH: f32 = 40.0;
 /// The plate's height, inside the title band.
 pub const PLATE_HEIGHT: f32 = 27.0;
+/// A row's height when the tabs run down a column.
+pub const ROW_HEIGHT: f32 = 28.0;
 /// The gap between plates.
 pub const GAP: f32 = 2.0;
-/// The glyph's tile: a touch wider than tall.
-const TILE_WIDTH: f32 = 24.0;
-const TILE_HEIGHT: f32 = 20.0;
-/// The tile sits as far from the plate's left edge as from its top.
-const TILE_INSET: f32 = (PLATE_HEIGHT - TILE_HEIGHT) / 2.0;
-/// Between the tile and the title.
-const TILE_GAP: f32 = 8.0;
+/// The title's line.
+const TITLE_HEIGHT: f32 = 20.0;
+/// Between the glyph and the title.
+const GLYPH_GAP: f32 = 8.0;
 /// The close button, and the room the title leaves for it.
 const CLOSE_SIZE: f32 = 20.0;
 const CLOSE_ROOM: f32 = 26.0;
@@ -64,21 +65,35 @@ pub fn reveal(scroll: &gpui_kit::ScrollHandle, index: usize, window: &Window) {
         });
         return;
     }
+    // The strip runs across the band or down a column. The plates fill the
+    // other axis, so it is always in view there and only the run moves.
     let mut offset = scroll.offset();
-    offset.x = match scroll.bounds_for_item(index) {
-        Some(plate) => reveal_offset(
-            f32::from(plate.left() - viewport.left()),
-            f32::from(plate.right() - viewport.left()),
-            f32::from(offset.x),
-            f32::from(viewport.size.width),
-        ),
-        None => -f32::MAX,
+    match scroll.bounds_for_item(index) {
+        Some(plate) => {
+            offset.x = reveal_offset(
+                f32::from(plate.left() - viewport.left()),
+                f32::from(plate.right() - viewport.left()),
+                f32::from(offset.x),
+                f32::from(viewport.size.width),
+            )
+            .into();
+            offset.y = reveal_offset(
+                f32::from(plate.top() - viewport.top()),
+                f32::from(plate.bottom() - viewport.top()),
+                f32::from(offset.y),
+                f32::from(viewport.size.height),
+            )
+            .into();
+        }
+        None => {
+            offset.x = (-f32::MAX).into();
+            offset.y = (-f32::MAX).into();
+        }
     }
-    .into();
     scroll.set_offset(offset);
 }
 
-/// The horizontal offset that shows a plate spanning `left..right` (in the
+/// The offset along one axis that shows a plate spanning `left..right` (in the
 /// strip's unscrolled coordinates) in a viewport `viewport` wide, from
 /// offset `current`: unchanged if it is already in full view, else the plate
 /// lands flush against the nearer edge.
@@ -99,7 +114,7 @@ pub struct Tab {
     /// Group key for the hover swap inside the tab.
     pub group: SharedString,
     pub title: SharedString,
-    /// A glyph path for the tile, or `None` for a tab whose title says it all.
+    /// A glyph path, or `None` for a tab whose title says it all.
     pub icon: Option<&'static str>,
     pub active: bool,
     /// Whether this tab can be closed. The pane's home tab cannot.
@@ -111,11 +126,14 @@ pub struct Tab {
 /// Draw the strip. `on_select`, `on_rename` (a double click) and `on_close`
 /// receive the tab's index; `scroll` is the strip's own offset, which
 /// [`reveal`] moves just far enough to show a plate. `trailing` follows the
-/// last plate, as close to it as the plates are to each other.
+/// last plate, as close to it as the plates are to each other. `column`
+/// stacks the plates down a sidebar, each as wide as it, instead of across
+/// the band.
 pub fn tab_strip(
     tabs: Vec<Tab>,
     scroll: &gpui_kit::ScrollHandle,
     trailing: Option<AnyElement>,
+    column: bool,
     on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
     on_rename: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
     on_close: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
@@ -123,16 +141,26 @@ pub fn tab_strip(
     let mut strip = div()
         .id("tab-strip")
         .flex()
-        .flex_row()
-        .items_center()
         .gap(px(GAP))
-        .min_w_0()
-        .overflow_x_scroll()
+        .map(|strip| match column {
+            true => strip
+                .flex_col()
+                .flex_1()
+                .w_full()
+                .min_h_0()
+                .overflow_y_scroll(),
+            false => strip
+                .flex_row()
+                .items_center()
+                .min_w_0()
+                .overflow_x_scroll(),
+        })
         .track_scroll(scroll);
     for (index, tab) in tabs.into_iter().enumerate() {
         strip = strip.child(plate(
             index,
             tab,
+            column,
             on_select.clone(),
             on_rename.clone(),
             on_close.clone(),
@@ -146,6 +174,7 @@ pub fn tab_strip(
 fn plate(
     index: usize,
     tab: Tab,
+    column: bool,
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
     on_rename: impl Fn(usize, &mut Window, &mut App) + 'static,
     on_close: impl Fn(usize, &mut Window, &mut App) + 'static,
@@ -153,35 +182,48 @@ fn plate(
     let group = tab.group.clone();
     let fade = tab.group.clone();
     let closable = tab.closable;
+    // Across the band every tab is a plate, so a row of them reads as one
+    // control. Down a column only the selected one is lit, as in any
+    // sidebar list: plates there would read as all selected.
+    let (rest, hover) = match column {
+        true => (0.0, 0.06),
+        false => (0.04, 0.07),
+    };
+    let height = if column { ROW_HEIGHT } else { PLATE_HEIGHT };
     div()
         .id(tab.id)
         .group(group.clone())
         .relative()
-        .h(px(PLATE_HEIGHT))
-        // Every plate starts at the full width and gives way at the same
-        // rate, so a crowded band splits evenly between them.
-        .w(px(MAX_WIDTH))
-        .flex_shrink(1.0)
-        .min_w(px(if tab.active {
-            SELECTED_MIN_WIDTH
-        } else {
-            MIN_WIDTH
-        }))
+        .h(px(height))
+        .map(|plate| match column {
+            // In a column every row is the column's width.
+            true => plate.w_full().flex_none(),
+            // Across the band every plate starts at the full width and gives
+            // way at the same rate, so a crowded band splits evenly.
+            false => plate
+                .w(px(MAX_WIDTH))
+                .flex_shrink(1.0)
+                .min_w(px(if tab.active {
+                    SELECTED_MIN_WIDTH
+                } else {
+                    MIN_WIDTH
+                })),
+        })
         .overflow_hidden()
-        .pl(px(if tab.icon.is_some() { TILE_INSET } else { 10.0 }))
+        .pl(px(if column { 8.0 } else { 10.0 }))
         .pr(px(if closable { CLOSE_ROOM } else { 8.0 }))
-        .rounded(px(6.0))
+        .rounded(px(if column { 8.0 } else { 6.0 }))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(TILE_GAP))
+        .gap(px(GLYPH_GAP))
         .cursor_pointer()
         // Never `occlude()`: a blocking hitbox ends the hit test, and the
         // strip behind the plates would stop scrolling under the wheel.
         .when(tab.active, |plate| plate.bg(wash(0.10)))
         .when(!tab.active, |plate| {
             plate
-                .bg(motion::fade_color(&fade, wash(0.04), wash(0.07)))
+                .bg(motion::fade_color(&fade, wash(rest), wash(hover)))
                 .on_hover(motion::on_hover_fade(&fade))
         })
         .on_click(move |event, window, cx| {
@@ -192,12 +234,12 @@ fn plate(
                 on_select(index, window, cx);
             }
         })
-        .children(tab.icon.map(|path| TabTile { path }))
+        .children(tab.icon.map(|path| TabGlyph { path }))
         .child(
             div()
                 .min_w_0()
                 .flex_1()
-                .h(px(TILE_HEIGHT))
+                .h(px(TITLE_HEIGHT))
                 .flex()
                 .items_center()
                 .text_size(ui_rems(13.0))
@@ -218,7 +260,7 @@ fn plate(
                     .id(("tab-strip-close", index))
                     .absolute()
                     .right(px(4.0))
-                    .top(px((PLATE_HEIGHT - CLOSE_SIZE) / 2.0))
+                    .top(px((height - CLOSE_SIZE) / 2.0))
                     .size(px(CLOSE_SIZE))
                     .rounded(px(4.0))
                     .flex()
@@ -237,31 +279,19 @@ fn plate(
         .into_any_element()
 }
 
-/// The tab's glyph on a small raised tile.
+/// The tab's glyph, bare: a tile around it is all a narrow tab
+/// would show.
 #[derive(IntoElement)]
-struct TabTile {
+struct TabGlyph {
     path: &'static str,
 }
 
-impl RenderOnce for TabTile {
+impl RenderOnce for TabGlyph {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = Theme::of(cx);
-        div()
+        crate::ui::icons::icon(self.path)
             .flex_none()
-            .w(px(TILE_WIDTH))
-            .h(px(TILE_HEIGHT))
-            .rounded(px(5.0))
-            .bg(theme.surface_raised)
-            .border_1()
-            .border_color(hairline(0.10))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                crate::ui::icons::icon(self.path)
-                    .size(px(14.0))
-                    .text_color(theme.text),
-            )
+            .size(px(14.0))
+            .text_color(Theme::of(cx).text_muted)
     }
 }
 

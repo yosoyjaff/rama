@@ -120,6 +120,7 @@ fn init(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     updater::init(cx);
     crate::features::command_line::init(cx);
+    crate::features::history::init(cx);
     cx.set_menus(app_menus());
 }
 

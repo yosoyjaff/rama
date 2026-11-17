@@ -50,6 +50,7 @@ pub enum Accent {
     Cyan,
     Blue,
     Pink,
+    Mono,
     Custom {
         red: u8,
         green: u8,
@@ -85,6 +86,21 @@ pub struct Look {
     pub mode: Mode,
     pub accent: Accent,
     pub palette: Palette,
+    /// Where the open projects' tabs are listed.
+    pub tabs: TabSide,
+}
+
+/// The edge of the window the project tabs run along.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TabSide {
+    /// Across the title band.
+    #[default]
+    Top,
+    /// A column down the left edge.
+    Left,
+    /// A column down the right edge.
+    Right,
 }
 
 // ── History ─────────────────────────────────────────────────────────────────
@@ -298,6 +314,8 @@ pub struct History {
     pub authors: Authors,
     /// The branch badges column at the left.
     pub badges: bool,
+    /// The sidebar of branches, remotes, tags and stashes beside the graph.
+    pub sidebar: bool,
     pub panel: Panel,
     pub pull: Pull,
     /// Merge with a merge commit even when a fast-forward would do.
@@ -310,6 +328,7 @@ impl Default for History {
             columns: Columns::default(),
             authors: Authors::default(),
             badges: true,
+            sidebar: true,
             panel: Panel::default(),
             pull: Pull::default(),
             merge_commit: true,
@@ -528,6 +547,11 @@ mod tests {
             ColumnId::Date.default_width()
         );
         assert!(read.history.columns.author.shown);
+        assert!(
+            read.history.sidebar,
+            "a file from before the setting keeps it"
+        );
+        assert_eq!(read.look.tabs, TabSide::Top, "tabs stay across the top");
         assert_eq!(read.diff, Diff::default());
     }
 

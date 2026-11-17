@@ -1,9 +1,9 @@
 //! The toolbar above the graph: undo and redo, pull (with fetch and the pull
 //! mode in its menu), push, stash and pop.
 //!
-//! It is a strip across the top rather than something floating over the
-//! rows, which would cover the newest commits, the very ones these buttons
-//! act on.
+//! The buttons sit in the pane's header band, beside the branch, rather than
+//! floating over the rows, which would cover the newest commits, the very
+//! ones they act on.
 
 use gpui_kit::{
     AnyElement, Context, Div, ElementId, Hsla, MouseButton, MouseDownEvent, SharedString, Stateful,
@@ -188,19 +188,13 @@ impl HistoryView {
             .dismiss(cx, |history| &mut history.popups.pull);
     }
 
-    pub(super) fn render_toolbar(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let mut bar = div()
-            .flex_none()
-            .w_full()
-            .h(px(42.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .px(px(8.0))
-            .border_b_1()
-            .border_color(theme::hairline(0.06))
-            // Equal room at both ends keeps the buttons centred.
-            .child(div().flex_1().min_w_0());
+    /// The toolbar's buttons, in their groups, for the pane's header band:
+    /// `None` until a checkout is shown, as they act on it.
+    pub fn render_tools(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.checkout.shown.as_ref()?;
+        let theme = Theme::of(cx).clone();
+        let theme = &theme;
+        let mut bar = div().flex_none().flex().items_center().gap(px(8.0));
         for (at, group) in GROUPS.iter().enumerate() {
             if at > 0 {
                 bar = bar.child(
@@ -219,7 +213,7 @@ impl HistoryView {
                 });
             }
         }
-        bar.child(div().flex_1().min_w_0()).into_any_element()
+        Some(bar.into_any_element())
     }
 
     fn tool_button(&self, tool: Tool, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {

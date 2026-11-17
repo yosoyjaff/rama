@@ -1,28 +1,30 @@
-//! Finding commits: the search field above the graph, which grows out of a
-//! magnifier button, marks the matching rows where they are and steps
-//! between them; and the button that switches to the branch tips.
+//! Finding commits: a magnifier button above the graph that drops down a
+//! find card, which marks the matching rows where they are and steps between
+//! them; and the button that switches to the branch tips.
 
 use std::ops::Range;
 use std::time::Duration;
 
 use gpui_kit::{
-    AnyElement, Context, Entity, MouseButton, Render, SharedString, Stateful, Subscription, Task,
-    Window, div, prelude::*, px,
+    AnyElement, Context, Entity, FocusHandle, KeyDownEvent, MouseButton, Render, SharedString,
+    Stateful, Subscription, Window, div, prelude::*, px,
 };
 
 use super::{HistoryView, Scope, WORKTREE_ROW};
 use crate::git::Commit;
 use crate::ui::chrome;
 use crate::ui::icons;
-use crate::ui::motion::{self, AnimationExt as _};
+use crate::ui::motion;
+use crate::ui::popover;
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::{self, Theme};
 use crate::ui::tip::tip as tooltip;
 
-/// The open field's width.
-const FIELD_WIDTH: f32 = 280.0;
-/// An empty field closes itself after this long.
-const CLOSE_WHEN_IDLE: Duration = Duration::from_millis(1_500);
+/// The find card's width.
+const CARD_WIDTH: f32 = 300.0;
+/// The query box inside it, and the buttons beside it.
+const QUERY_HEIGHT: f32 = 26.0;
+const CARD_BUTTON: f32 = 24.0;
 const TOOLTIP_DELAY: Duration = Duration::from_millis(350);
 
 /// The search over the loaded rows.
@@ -227,9 +229,8 @@ impl Render for ScopeToggle {
 enum Field {
     /// Only the magnifier is shown.
     Closed,
+    /// The find card hangs under it.
     Open,
-    /// Shrinking back into the magnifier.
-    Closing,
 }
 
 /// The search field above the graph.
@@ -237,18 +238,26 @@ pub struct SearchField {
     history: Entity<HistoryView>,
     input: Entity<TextInput>,
     field: Field,
-    /// Bumped to call off a timer that is still pending.
-    generation: usize,
-    idle_timer: Option<Task<()>>,
-    close_timer: Option<Task<()>>,
     on_blur: Option<Subscription>,
+    /// Where the focus was when the card opened, to go back to on Escape.
+    restore: Option<FocusHandle>,
+    /// Where the focus goes when there is nothing to go back to. Without it
+    /// the focus would stay on the unmounted field, and neither Ctrl+F nor
+    /// any other key would reach the window's commands.
+    fallback: Option<FocusHandle>,
     _observe: Subscription,
     _input: Subscription,
 }
 
 impl SearchField {
     pub fn new(history: Entity<HistoryView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| TextInput::new("Search", window, cx).with_text_size(11.0));
+        let input = cx.new(|cx| {
+            TextInput::new("Search", window, cx)
+                .with_text_size(12.0)
+                // The short field: the full one is taller than the card's
+                // query box and would sit clipped, off centre.
+                .compact()
+        });
         // The query can change from the history's side too; keep the field
         // showing it.
         let observe = cx.observe_in(&history, window, |this, history, window, cx| {
@@ -267,13 +276,8 @@ impl SearchField {
             }
             TextInputEvent::Edited => {
                 let query = input.read(cx).text().to_string();
-                let empty = query.is_empty();
                 this.history
                     .update(cx, |history, cx| history.search_for(query, cx));
-                match empty {
-                    true => this.close_when_idle(cx),
-                    false => this.stop_timers(),
-                }
             }
             _ => {}
         });
@@ -281,82 +285,65 @@ impl SearchField {
             history,
             input,
             field: Field::Closed,
-            generation: 0,
-            idle_timer: None,
-            close_timer: None,
             on_blur: None,
+            restore: None,
+            fallback: None,
             _observe: observe,
             _input: typing,
         }
-    }
-
-    fn stop_timers(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-        self.idle_timer = None;
-        self.close_timer = None;
     }
 
     fn is_empty(&self, cx: &Context<Self>) -> bool {
         self.input.read(cx).text().is_empty()
     }
 
-    /// Close an empty open field if it stays empty a moment.
-    fn close_when_idle(&mut self, cx: &mut Context<Self>) {
-        self.stop_timers();
-        if self.field != Field::Open || !self.is_empty(cx) {
-            return;
-        }
-        let generation = self.generation;
-        self.idle_timer = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(CLOSE_WHEN_IDLE).await;
-            this.update(cx, |this, cx| {
-                if this.generation == generation {
-                    this.close(cx);
-                }
-            })
-            .ok();
-        }));
+    /// Drop the card down and put the caret in it; if it is already open,
+    /// just the caret, as a find bar does on a second Ctrl+F.
+    /// The pane's own focus, for when the card closes and the focus it came
+    /// from is gone.
+    pub fn set_fallback_focus(&mut self, focus: FocusHandle) {
+        self.fallback = Some(focus);
     }
 
-    /// Shrink back into the magnifier, if the field is open and empty.
-    fn close(&mut self, cx: &mut Context<Self>) {
-        if self.field != Field::Open || !self.is_empty(cx) {
-            return;
-        }
-        self.stop_timers();
-        self.field = Field::Closing;
-        let generation = self.generation;
-        let shrink = motion::RESIZE.length();
-        self.close_timer = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(shrink).await;
-            this.update(cx, |this, cx| {
-                if this.generation == generation && this.field == Field::Closing {
-                    // Unmounting the input is what stops its caret.
-                    this.field = Field::Closed;
-                    cx.notify();
-                }
-            })
-            .ok();
-        }));
-        cx.notify();
-    }
-
-    fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.stop_timers();
+    pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mounted = self.field == Field::Open;
         self.field = Field::Open;
-        // The input is not mounted yet: focus it once the open field has
-        // been drawn, or the focus would land nowhere.
+        if !mounted {
+            self.restore = window.focused(cx);
+        }
+        if mounted {
+            window.focus(&self.input.read(cx).focus_handle(cx), cx);
+            return;
+        }
+        // The input is not mounted yet: focus it once the card has been
+        // drawn, or the focus would land nowhere.
         let this = cx.entity().downgrade();
         window.on_next_frame(move |window, cx| {
             this.update(cx, |this, cx| {
                 if this.field == Field::Open {
                     window.focus(&this.input.read(cx).focus_handle(cx), cx);
-                    this.close_when_idle(cx);
                     cx.notify();
                 }
             })
             .ok();
         });
+        cx.notify();
+    }
+
+    /// End the search and fold the card back into the magnifier.
+    fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Closed from the card itself, the focus goes back where it was; a
+        // click elsewhere has already moved it.
+        let input = self.input.read(cx).focus_handle(cx);
+        if input.is_focused(window)
+            && let Some(back) = self.restore.take().or_else(|| self.fallback.clone())
+        {
+            window.focus(&back, cx);
+        }
+        self.restore = None;
+        self.clear(window, cx);
+        // Unmounting the input is what stops its caret.
+        self.field = Field::Closed;
         cx.notify();
     }
 
@@ -369,66 +356,65 @@ impl SearchField {
         // Setting the text from code raises no edit, so tell the history.
         self.history
             .update(cx, |history, cx| history.search_for(String::new(), cx));
-        self.close_when_idle(cx);
         cx.notify();
     }
 
-    fn render_closed(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    /// The magnifier. It stays lit while the card is open or a search is
+    /// marking rows, and a second click folds the card away.
+    fn render_trigger(
+        &self,
+        open: bool,
+        searching: bool,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let id = "history-search-trigger";
         let this = cx.entity().downgrade();
         square_button(id)
-            .bg(motion::fade_color(id, theme::wash(0.0), theme::wash(0.14)))
+            .map(|button| match open || searching {
+                true => button.bg(theme::wash(0.10)),
+                false => button.bg(motion::fade_color(id, theme::wash(0.0), theme::wash(0.14))),
+            })
             .child(
                 icons::icon(icons::MAGNIFER)
                     .size(px(chrome::ICON_SIZE))
-                    .text_color(theme.text_muted),
+                    .text_color(if open || searching {
+                        theme.text
+                    } else {
+                        theme.text_muted
+                    }),
             )
             .tooltip(tooltip("Search commits"))
             .tooltip_show_delay(TOOLTIP_DELAY)
+            // Keeps the query focused, so the press does not close the card
+            // just before the click would.
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .on_click(move |_, window, cx| {
                 cx.stop_propagation();
-                this.update(cx, |this, cx| this.open(window, cx)).ok();
+                this.update(cx, |this, cx| match this.field {
+                    Field::Open => this.dismiss(window, cx),
+                    // The same opening Ctrl+F's action ends in. Not through
+                    // the action: with the focus on a field no longer drawn,
+                    // GPUI sends it from the window's root, which is above
+                    // the shell that answers it, and the click does nothing.
+                    Field::Closed => this.open(window, cx),
+                })
+                .ok();
             })
             .into_any_element()
     }
 }
 
-/// A tiny icon button inside the field. It keeps the field focused, since
-/// losing focus closes the search.
-fn field_button(
-    id: &'static str,
-    glyph: &'static str,
-    size: f32,
-    color: gpui_kit::Hsla,
-    live: bool,
-) -> Stateful<gpui_kit::Div> {
-    div()
-        .id(id)
-        .flex_none()
-        .size(px(16.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(3.5))
-        .when(live, |button| {
-            button.cursor_pointer().hover(|s| s.bg(theme::ink(0.08)))
-        })
-        .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
-        .child(icons::icon(glyph).size(px(size)).text_color(color))
-}
-
 impl Render for SearchField {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::of(cx).clone();
-        if self.field == Field::Closed {
-            return self.render_closed(&theme, cx);
-        }
-        if self.on_blur.is_none() {
+        let open = self.field == Field::Open;
+        if open && self.on_blur.is_none() {
             let focus = self.input.read(cx).focus_handle(cx);
+            // Clicking anywhere else ends the search and folds the card.
             self.on_blur =
-                Some(cx.on_blur(&focus, window, |this, window, cx| this.clear(window, cx)));
+                Some(cx.on_blur(&focus, window, |this, window, cx| this.dismiss(window, cx)));
         }
-
         let (searching, hits, current) = {
             let history = self.history.read(cx);
             (
@@ -437,6 +423,26 @@ impl Render for SearchField {
                 history.search.at,
             )
         };
+        let trigger = self.render_trigger(open, searching, &theme, cx);
+        let card = open.then(|| self.render_card(searching, hits, current, &theme, cx));
+        div().relative().flex_none().child(trigger).children(
+            card.map(|card| popover::anchored_menu_below("history-search-card", card, None)),
+        )
+    }
+}
+
+impl SearchField {
+    /// The find card: the query with its tally, the arrows and the close
+    /// button, in the shape of an editor's find panel.
+    fn render_card(
+        &self,
+        searching: bool,
+        hits: usize,
+        current: Option<usize>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let missed = searching && hits == 0;
         // Counted over the rows loaded, which are the ones the arrows reach.
         let tally = searching.then(|| {
             let text = match (hits, current) {
@@ -446,97 +452,116 @@ impl Render for SearchField {
             };
             div()
                 .flex_none()
-                .text_size(px(10.5))
-                .text_color(if hits == 0 {
+                .text_size(px(11.0))
+                .text_color(if missed {
                     theme.danger_muted
                 } else {
                     theme.text_faint
                 })
                 .child(SharedString::from(text))
         });
-        let step = |id, glyph, forward: bool| {
+        let query = div()
+            .h(px(QUERY_HEIGHT))
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(if missed {
+                theme.danger_muted.opacity(0.55)
+            } else {
+                theme::hairline(0.10)
+            })
+            .bg(theme::ink(0.06))
+            // No height of its own, so the field is its own height and the
+            // box centres it.
+            .child(div().flex_1().min_w_0().child(self.input.clone()))
+            .children(tally);
+        let step = |id, glyph, forward: bool, hint| {
             let history = self.history.downgrade();
             let color = match hits {
                 0 => theme.text_faint.opacity(0.5),
                 _ => theme.text_muted,
             };
-            field_button(id, glyph, 10.0, color, hits > 0).on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                history
-                    .update(cx, |history, cx| history.next_hit(forward, cx))
-                    .ok();
-            })
+            card_button(id, glyph, color, hits > 0)
+                .tooltip(tooltip(hint))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    history
+                        .update(cx, |history, cx| history.next_hit(forward, cx))
+                        .ok();
+                })
         };
         let this = cx.entity().downgrade();
-        let close = field_button(
-            "history-search-close",
-            icons::CLOSE,
-            9.0,
-            theme.text_faint,
-            true,
-        )
-        .on_click(move |_, window, cx| {
-            cx.stop_propagation();
-            this.update(cx, |this, cx| this.clear(window, cx)).ok();
-        });
-        let closing = self.field == Field::Closing;
-        let animation = SharedString::from(format!(
-            "history-search-{}-{}",
-            self.generation,
-            if closing { "close" } else { "open" }
-        ));
-        div()
-            .id("history-search-expanded")
-            .h(px(chrome::CONTROL_SIZE))
-            .w(px(FIELD_WIDTH))
-            .min_w(px(80.0))
-            .flex_shrink(1.0)
-            .overflow_hidden()
+        let close = card_button("history-search-close", icons::CLOSE, theme.text_muted, true)
+            .tooltip(tooltip("Close"))
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                this.update(cx, |this, cx| this.dismiss(window, cx)).ok();
+            });
+        popover::popover_card(theme)
+            // As in an editor's find bar: Escape closes, Shift+Enter goes
+            // back (Enter, forward, is the field's own submit). Caught before
+            // the field, which would take Shift+Enter as Enter.
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let key = &event.keystroke;
+                if key.key == "escape" {
+                    cx.stop_propagation();
+                    this.dismiss(window, cx);
+                } else if key.key == "enter" && key.modifiers.shift {
+                    cx.stop_propagation();
+                    this.history
+                        .update(cx, |history, cx| history.next_hit(false, cx));
+                }
+            }))
+            .w(px(CARD_WIDTH))
+            .p(px(6.0))
             .flex()
+            .flex_row()
             .items_center()
-            .gap(px(6.0))
-            .pl(px(chrome::EDGE_INSET))
-            .pr(px(2.0))
-            .rounded(px(chrome::CONTROL_RADIUS))
-            .bg(theme::ink(0.035))
-            .child(
-                div()
-                    .flex_none()
-                    .size(px(14.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        icons::icon(icons::MAGNIFER)
-                            .size(px(11.0))
-                            .text_color(theme.text_faint),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .overflow_hidden()
-                    .child(self.input.clone()),
-            )
-            .children(tally)
-            .when(searching, |field| {
-                field
-                    .child(step("history-search-previous", icons::ALT_ARROW_UP, false))
-                    .child(step("history-search-next", icons::ALT_ARROW_DOWN, true))
-            })
+            .gap(px(2.0))
+            .child(query)
+            .child(step(
+                "history-search-previous",
+                icons::ALT_ARROW_UP,
+                false,
+                "Previous match",
+            ))
+            .child(step(
+                "history-search-next",
+                icons::ALT_ARROW_DOWN,
+                true,
+                "Next match",
+            ))
             .child(close)
-            .with_animation(animation, motion::RESIZE.animation(), move |field, t| {
-                let open = if closing { 1.0 - t } else { t };
-                field
-                    .w(px(24.0 + (FIELD_WIDTH - 24.0) * open))
-                    .opacity(0.45 + 0.55 * open)
-            })
             .into_any_element()
     }
+}
+
+/// A button on the find card. It keeps the query focused, since losing
+/// focus closes the search.
+fn card_button(
+    id: &'static str,
+    glyph: &'static str,
+    color: gpui_kit::Hsla,
+    live: bool,
+) -> Stateful<gpui_kit::Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .size(px(CARD_BUTTON))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.0))
+        .when(live, |button| {
+            button.cursor_pointer().hover(|s| s.bg(theme::ink(0.08)))
+        })
+        .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+        .child(icons::icon(glyph).size(px(12.0)).text_color(color))
 }
 
 #[cfg(test)]
