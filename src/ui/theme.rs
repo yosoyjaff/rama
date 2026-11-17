@@ -43,6 +43,8 @@ pub enum AccentColor {
     Cyan,
     Blue,
     Pink,
+    /// No hue: near white in the dark, near black in the light.
+    Mono,
     /// Picked with the colour picker, kept as sRGB so it is saved exactly.
     Custom {
         red: u8,
@@ -65,7 +67,7 @@ struct Family {
 
 impl AccentColor {
     /// The ready-made families, in the order the settings show them.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Indigo,
         Self::Orange,
         Self::Amber,
@@ -73,6 +75,7 @@ impl AccentColor {
         Self::Cyan,
         Self::Blue,
         Self::Pink,
+        Self::Mono,
     ];
 
     pub fn label(self) -> &'static str {
@@ -84,6 +87,7 @@ impl AccentColor {
             Self::Cyan => "Cyan",
             Self::Blue => "Blue",
             Self::Pink => "Pink",
+            Self::Mono => "Mono",
             Self::Custom { .. } => "Custom",
         }
     }
@@ -135,6 +139,9 @@ impl AccentColor {
                 (0.592, 0.249, 0.584),
                 (0.525, 0.223, 3.958),
             ),
+            // Greys: a light one to draw with on the dark, a mid one under
+            // light text, and a near black on white.
+            Self::Mono => family((0.87, 0.0, 0.0), (0.45, 0.0, 0.0), (0.32, 0.0, 0.0)),
             Self::Custom { .. } => return None,
         })
     }
@@ -691,7 +698,11 @@ mod tests {
             green: 40,
             blue: 90,
         };
-        let accents = AccentColor::ALL.into_iter().chain([picked]);
+        // Mono is the one preset without a hue, on purpose.
+        let accents = AccentColor::ALL
+            .into_iter()
+            .filter(|accent| *accent != AccentColor::Mono)
+            .chain([picked]);
         for (accent, appearance) in
             accents.flat_map(|accent| [(accent, Appearance::Dark), (accent, Appearance::Light)])
         {
@@ -699,6 +710,18 @@ mod tests {
             assert!(theme.accent.s > 0.0, "{accent:?} {appearance:?}");
             assert_eq!(theme.busy, theme.accent);
             assert_eq!(theme.indicator[1], theme.accent);
+        }
+    }
+
+    #[test]
+    fn the_mono_accent_is_grey_and_carries_light_text() {
+        for appearance in [Appearance::Dark, Appearance::Light] {
+            let theme = Theme::build(appearance, AccentColor::Mono);
+            assert_eq!(theme.accent.s, 0.0, "{appearance:?}");
+            assert!(
+                contrast(theme.on_accent, theme.accent_strong) >= 3.0,
+                "{appearance:?}"
+            );
         }
     }
 

@@ -45,7 +45,10 @@ const GRAB_ROOM: Pixels = px(48.);
 
 /// One Linux caption button, its glyph, and the space between buttons.
 const BUTTON: Pixels = px(24.);
-const BUTTON_GLYPH: Pixels = px(16.);
+const BUTTON_GLYPH: Pixels = px(14.);
+/// The restore glyph, a 16px drawing shown a little larger so its two
+/// windows sit level with the 14px marks beside it.
+const RESTORE_GLYPH: Pixels = px(19.);
 const BUTTON_GAP: Pixels = px(2.);
 /// Space between the Linux buttons and the content next to them.
 const BUTTONS_GAP: Pixels = px(6.);
@@ -65,6 +68,8 @@ const SYSTEM_CLOSE_RED: u32 = 0x00e8_1123;
 #[derive(IntoElement, Default)]
 pub struct AppTitleBar {
     content: Option<AnyElement>,
+    /// Drop the rule in front of the trailing window buttons.
+    no_rule: bool,
 }
 
 impl AppTitleBar {
@@ -86,6 +91,13 @@ impl AppTitleBar {
             app_owns_titlebar_drag: true,
             ..Default::default()
         }
+    }
+
+    /// No rule before the window buttons: for a band with nothing in it but
+    /// a couple of buttons, where the rule parts nothing.
+    pub fn without_rule(mut self) -> Self {
+        self.no_rule = true;
+        self
     }
 
     pub fn content(mut self, content: impl IntoElement) -> Self {
@@ -178,11 +190,9 @@ fn linux_button(button: WindowButton, maximized: bool, cx: &App) -> impl IntoEle
         WindowButton::Close => ("window-close", IconName::Close),
     };
     let theme = cx.theme();
-    let (hover_bg, hover_fg): (Hsla, Hsla) = if button == WindowButton::Close {
-        (rgb(SYSTEM_CLOSE_RED).into(), white())
-    } else {
-        (theme.foreground.opacity(0.10), theme.foreground)
-    };
+    // One quiet wash for all three, close included, as the rest of the
+    // chrome's icon buttons.
+    let (hover_bg, hover_fg): (Hsla, Hsla) = (theme.foreground.opacity(0.10), theme.foreground);
     let group = SharedString::from(format!("{id}-group"));
 
     div()
@@ -212,8 +222,14 @@ fn linux_button(button: WindowButton, maximized: bool, cx: &App) -> impl IntoEle
             svg()
                 .path(icon.path())
                 .flex_none()
-                .size(BUTTON_GLYPH)
-                .text_color(theme.muted_foreground)
+                // Restore is Rama's own 16px drawing, shown larger; the others
+                // are 24px drawings shown at 14px.
+                .size(if matches!(icon, IconName::WindowRestore) {
+                    RESTORE_GLYPH
+                } else {
+                    BUTTON_GLYPH
+                })
+                .text_color(theme.foreground.opacity(0.5))
                 .group_hover(group, move |s| s.text_color(hover_fg)),
         )
 }
@@ -393,7 +409,7 @@ impl RenderOnce for AppTitleBar {
                     .when(has_left, |slot| slot.ml(BUTTON_GAP))
             }))
             .child(div().flex_1().min_w(GRAB_ROOM).h_full())
-            .when(trailing_buttons, |bar| {
+            .when(trailing_buttons && !self.no_rule, |bar| {
                 bar.child(
                     div()
                         .flex_none()

@@ -5,11 +5,10 @@
 //! its own glyphs without a second icon enum: `IconName::Close` still resolves
 //! to `icons/close.svg`, and this source decides which file that is.
 //!
-//! The caption glyphs are overridden because weight is the whole point of
-//! window chrome. Lucide draws a 24×24 box with the mark filling two thirds of
-//! it; a caption button wants a mark that occupies about 40% of its box, drawn
-//! in a hairline, so it reads as system chrome rather than as a toolbar icon.
-//! They are drawn at a 16×16 viewBox with a 6.5px mark and a 1.25 stroke.
+//! The caption glyphs are overridden so the window buttons match the rest of
+//! the chrome: minimize, maximize and close are 24px drawings shown at 14px
+//! (Hugeicons' `square` for maximize, MIT), and restore is Rama's own 16px
+//! two-window mark.
 //!
 //! The product's own glyph set lives in [`crate::ui::icons`] and is served
 //! here too, ahead of the bundle.
@@ -43,6 +42,13 @@ const OVERRIDES: &[(&str, &[u8])] = &[
 pub const APP_ICON: &str = "app-icon/256x256.png";
 const APP_ICON_BYTES: &[u8] = include_bytes!("../assets/app-icon/256x256.png");
 
+/// The app icon's mark alone, without its tile, for the About page: light
+/// for the dark appearance and dark for the light one, both 256px.
+pub const MARK_LIGHT: &str = "app-icon/mark-light.png";
+pub const MARK_DARK: &str = "app-icon/mark-dark.png";
+const MARK_LIGHT_BYTES: &[u8] = include_bytes!("../assets/app-icon/mark-light.png");
+const MARK_DARK_BYTES: &[u8] = include_bytes!("../assets/app-icon/mark-dark.png");
+
 /// This application's assets, with GPUI Kit's bundled icons behind them.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Assets;
@@ -54,6 +60,12 @@ impl AssetSource for Assets {
         }
         if path == APP_ICON {
             return Ok(Some(Cow::Borrowed(APP_ICON_BYTES)));
+        }
+        if path == MARK_LIGHT {
+            return Ok(Some(Cow::Borrowed(MARK_LIGHT_BYTES)));
+        }
+        if path == MARK_DARK {
+            return Ok(Some(Cow::Borrowed(MARK_DARK_BYTES)));
         }
         if let Some(bytes) = crate::ui::icons::load(path)? {
             return Ok(Some(bytes));
@@ -90,26 +102,11 @@ mod tests {
 
     #[test]
     fn the_caption_glyphs_are_the_applications_own() {
-        for (path, _) in OVERRIDES {
-            let bytes = Assets.load(path).unwrap().expect("override is served");
-            let svg = std::str::from_utf8(&bytes).expect("UTF-8 svg");
-            // A small mark in a 16px box at a hairline stroke, the size of
-            // the platform's own caption buttons; the bundle's are 24px
-            // boxes filled two thirds of the way.
-            assert!(
-                svg.contains(r#"viewBox="0 0 16 16""#),
-                "{path} is not the 16px chrome glyph: {svg}"
-            );
-            let stroke: f32 = svg
-                .split(r#"stroke-width=""#)
-                .nth(1)
-                .and_then(|rest| rest.split('"').next())
-                .and_then(|width| width.parse().ok())
-                .unwrap_or_else(|| panic!("{path} has no stroke width: {svg}"));
-            assert!(
-                (1.0..=1.5).contains(&stroke),
-                "{path} is not a hairline: {svg}"
-            );
+        for (path, bytes) in OVERRIDES {
+            let served = Assets.load(path).unwrap().expect("override is served");
+            assert_eq!(served.as_ref(), *bytes, "{path} comes from the bundle");
+            let svg = std::str::from_utf8(bytes).expect("UTF-8 svg");
+            assert!(svg.contains("stroke-width"), "{path} is not a line glyph");
         }
     }
 

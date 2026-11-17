@@ -70,6 +70,8 @@ impl Surface {
 pub struct Workspace {
     tabs: Vec<Surface>,
     active: usize,
+    /// The tab that was open when the settings were, for Back to app.
+    before_settings: Option<usize>,
     welcome: Entity<Welcome>,
     focus_handle: FocusHandle,
     /// The tab strip's scroll offset, kept here so activating a tab can bring
@@ -107,6 +109,7 @@ impl Workspace {
         let mut workspace = Self {
             tabs: vec![Surface::Home],
             active: 0,
+            before_settings: None,
             welcome,
             focus_handle: cx.focus_handle(),
             tab_scroll: gpui_kit::ScrollHandle::new(),
@@ -255,6 +258,9 @@ impl Workspace {
 
     /// The settings tab, opened or focused.
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.settings_active() {
+            self.before_settings = Some(self.active);
+        }
         if let Some(index) = self
             .tabs
             .iter()
@@ -273,6 +279,7 @@ impl Workspace {
                 SettingsPageEvent::ImportGitKraken { paths, active } => {
                     workspace.import_gitkraken(paths.clone(), active.clone(), window, cx);
                 }
+                SettingsPageEvent::Back => workspace.leave_settings(window, cx),
             },
         );
         self.tabs.push(Surface::Settings {
@@ -282,9 +289,36 @@ impl Workspace {
         self.activate(self.tabs.len() - 1, window, cx);
     }
 
+    /// Back from the settings to the tab that was open before them, or home.
+    /// The settings stay a surface, so their page is where it was next time.
+    pub fn leave_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let back = self
+            .before_settings
+            .take()
+            .filter(|&index| !matches!(self.tabs.get(index), Some(Surface::Settings { .. }) | None))
+            .unwrap_or(0);
+        self.activate(back, window, cx);
+    }
+
     /// The view Settings → About shows for updates. The shell owns it.
     pub fn set_update_panel(&mut self, panel: gpui_kit::AnyView) {
         self.update_panel = Some(panel);
+    }
+
+    /// Ask for a folder and open it as a tab: the + by the tabs. Home's
+    /// picker does the asking, so a folder that is not a repository is
+    /// reported there.
+    pub fn pick_project(&mut self, cx: &mut Context<Self>) {
+        self.welcome
+            .update(cx, |welcome, cx| welcome.pick_repository(cx));
+    }
+
+    /// Open the active project's find card. Home and the settings have
+    /// nothing to find in.
+    pub fn find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(Surface::Repo { pane, .. }) = self.tabs.get(self.active) {
+            pane.update(cx, |pane, cx| pane.find(window, cx));
+        }
     }
 
     /// Show the home screen without closing anything.

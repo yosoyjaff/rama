@@ -30,6 +30,7 @@ use gpui_kit::{App, KeyBinding};
 #[cfg(target_os = "macos")]
 use crate::actions::Quit;
 use crate::features::diff;
+use crate::features::history::FindCommits;
 
 /// The key context the shell's root element declares, and the scope an
 /// application-wide binding belongs in.
@@ -54,4 +55,12 @@ pub fn init(cx: &mut App) {
         diff::CopySelection,
         Some(diff::KEY_CONTEXT),
     )]);
+
+    // Find, as in an editor: Ctrl+F (Cmd+F) opens the history's find card.
+    // Enter, Shift+Enter and Escape are handled by the card itself.
+    #[cfg(target_os = "macos")]
+    const FIND: &str = "cmd-f";
+    #[cfg(not(target_os = "macos"))]
+    const FIND: &str = "ctrl-f";
+    cx.bind_keys([KeyBinding::new(FIND, FindCommits, Some(CONTEXT))]);
 }

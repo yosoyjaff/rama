@@ -23,6 +23,28 @@ use crate::ui::popover::{self, Layer};
 use crate::ui::text_input::TextInput;
 use crate::ui::theme::Theme;
 
+gpui_kit::actions!(
+    history,
+    [
+        /// Show or hide the sidebar of branches, remotes, tags and stashes.
+        /// Reached from the button at the left of the history's header.
+        ToggleSidebar,
+        /// Open the find card over the history and put the caret in it.
+        /// Bound to Ctrl+F (Cmd+F on macOS); also the magnifier button.
+        FindCommits,
+    ]
+);
+
+/// The history's commands that act on the preferences rather than on one
+/// pane, so they work wherever the focus is.
+pub fn init(cx: &mut gpui_kit::App) {
+    cx.on_action(|_: &ToggleSidebar, cx| {
+        crate::settings::update(crate::settings::SavePolicy::Immediate, cx, |settings| {
+            settings.history.sidebar = !settings.history.sidebar;
+        });
+    });
+}
+
 pub mod actions;
 pub mod bar;
 pub mod branch_column;
@@ -271,11 +293,6 @@ impl Render for HistoryView {
         let theme = Theme::of(cx).clone();
         let taken = self.width_beside_graph(cx);
 
-        let toolbar = self
-            .checkout
-            .shown
-            .is_some()
-            .then(|| self.render_toolbar(&theme, cx));
         let mut failures = Vec::new();
         if let Some(error) = &self.fetch.error {
             failures.push(failure_strip(
@@ -323,7 +340,6 @@ impl Render for HistoryView {
             .flex()
             .flex_col()
             .on_drag_move(cx.listener(Self::on_column_resize))
-            .children(toolbar)
             .children(failures)
             .child(sized)
             .children(popups)

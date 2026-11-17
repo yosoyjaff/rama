@@ -43,9 +43,9 @@ use crate::ui::{icons, motion};
 /// The divider between the graph (or the patch) and the commit panel.
 const DETAIL_SPLITTER: &str = "history-detail-splitter";
 
-/// Height of the strip above the graph. The same 24px control on a 36px band
-/// the rest of the chrome uses, so the two read as one bar.
-const HEADER_HEIGHT: f32 = 36.0;
+/// Height of the band above the graph, which holds the branch and the
+/// toolbar's 28px buttons in one row.
+const HEADER_HEIGHT: f32 = 42.0;
 
 /// The patch currently standing in for the graph.
 struct OpenDiff {
@@ -85,7 +85,13 @@ impl HistoryPane {
         let detail = cx.new(|cx| DetailPanel::new(repo.clone(), window, cx));
         let nav = cx.new(|cx| RepoNav::new(repo.clone(), window, cx));
         let branch_picker = cx.new(|cx| BranchPicker::new(repo.clone(), window, cx));
-        let search = cx.new(|cx| SearchField::new(graph.clone(), window, cx));
+        // The pane's focus, which the find card falls back to on closing.
+        let focus_handle = cx.focus_handle();
+        let search = cx.new(|cx| {
+            let mut search = SearchField::new(graph.clone(), window, cx);
+            search.set_fallback_focus(focus_handle.clone());
+            search
+        });
         let view_button = cx.new(|cx| ScopeToggle::new(graph.clone(), cx));
 
         let mut subscriptions = Vec::new();
@@ -95,6 +101,8 @@ impl HistoryPane {
             move |_, graph, cx| {
                 let branch = SharedString::from(graph.read(cx).branch().to_string());
                 branch_picker.update(cx, |picker, cx| picker.set_branch(branch, cx));
+                // The header draws the graph's toolbar, so it follows it.
+                cx.notify();
             }
         }));
         subscriptions.push(cx.subscribe(
@@ -228,7 +236,7 @@ impl HistoryPane {
             branch_picker,
             search,
             view_button,
-            focus_handle: cx.focus_handle(),
+            focus_handle,
             watch_tasks,
             watch,
             _subscriptions: subscriptions,
@@ -286,6 +294,14 @@ impl HistoryPane {
     }
 
     /// Read this repository again — something moved a ref, here or elsewhere.
+    /// Open the find card over the graph. Not while a patch stands in for
+    /// the graph: the card belongs to the graph's header, which is not shown.
+    pub fn find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.diff.is_none() {
+            self.search.update(cx, |search, cx| search.open(window, cx));
+        }
+    }
+
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.graph.update(cx, |graph, cx| {
             graph.refresh(cx);
@@ -505,8 +521,12 @@ impl HistoryPane {
 
     /// The strip above the graph: the branch selector, and the graph's own
     /// controls.
+    /// One band across the top: the sidebar button and the branch on the
+    /// left, the toolbar in the middle, search and the view menu on the
+    /// right. The toolbar gives way first when the band runs short.
     fn render_header(&mut self, cx: &mut Context<Self>) -> gpui_kit::Div {
         let theme = Theme::of(cx).clone();
+        let tools = self.graph.update(cx, |graph, cx| graph.render_tools(cx));
         div()
             .h(px(HEADER_HEIGHT))
             .flex_none()
@@ -516,17 +536,64 @@ impl HistoryPane {
             .items_center()
             .gap(px(6.0))
             .px(px(EDGE_INSET))
-            // No rule under it: the toolbar below is the same band, and its
-            // own hairline closes both.
             .bg(theme.surface)
+            .border_b_1()
+            .border_color(crate::ui::theme::hairline(0.06))
+            .child(self.render_sidebar_button(&theme, cx))
             .child(self.branch_picker.clone())
-            .child(div().flex_1().min_w_0())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .overflow_hidden()
+                    .children(tools),
+            )
             .child(self.search.clone())
             .child(self.view_button.clone())
     }
 }
 
 impl HistoryPane {
+    /// The button that shows or hides the sidebar. It stays in the header
+    /// either way, so the sidebar can always be brought back.
+    fn render_sidebar_button(
+        &self,
+        theme: &Theme,
+        cx: &Context<Self>,
+    ) -> gpui_kit::Stateful<gpui_kit::Div> {
+        let shown = crate::settings::current(cx).history.sidebar;
+        let id = "history-toggle-sidebar";
+        let (rest, lit) = (theme.text_muted, theme.text);
+        div()
+            .id(id)
+            .group(id)
+            .size(px(CONTROL_SIZE))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(CONTROL_RADIUS))
+            .cursor_pointer()
+            .bg(motion::fade_color(id, wash(0.0), wash(0.10)))
+            .on_hover(motion::on_hover_fade(id))
+            .tooltip(crate::ui::tip::tip(if shown {
+                "Hide sidebar"
+            } else {
+                "Show sidebar"
+            }))
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(super::ToggleSidebar), cx))
+            .child(
+                icons::icon(icons::SIDEBAR_MINIMALISTIC_LEFT)
+                    .size(px(14.0))
+                    .text_color(rest)
+                    .group_hover(id, move |style| style.text_color(lit)),
+            )
+    }
+
     /// The graph (or the patch) and, while something is selected, the commit
     /// panel beside it, split by a divider that drags. The
     /// navigation panel stays outside the split, so the ratio is of the width the two actually share.
@@ -627,8 +694,11 @@ impl Render for HistoryPane {
             .has_selection()
             .then(|| self.render_detail_header(cx));
         let theme = Theme::of(cx).clone();
+        let sidebar = !reading && crate::settings::current(cx).history.sidebar;
 
         div()
+            // Drawn, so the focus has somewhere in the pane to land.
+            .track_focus(&self.focus_handle)
             .size_full()
             .flex()
             .flex_col()
@@ -641,7 +711,7 @@ impl Render for HistoryPane {
                     .w_full()
                     .flex()
                     .flex_row()
-                    .when(!reading, |row| row.child(self.nav.clone()))
+                    .when(sidebar, |row| row.child(self.nav.clone()))
                     .child(self.render_split(middle, detail_header, corner, &theme, cx)),
             )
     }

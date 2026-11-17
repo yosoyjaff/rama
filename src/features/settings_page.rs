@@ -23,7 +23,9 @@ use crate::ui::typography::ui_rems;
 use crate::ui::{icons, motion};
 
 /// Width of the section rail.
-const RAIL_WIDTH: f32 = 176.0;
+const RAIL_WIDTH: f32 = 200.0;
+/// A rail row's glyph.
+const NAV_ICON: f32 = 16.0;
 /// The page is a column held to this width and centred in whatever room the
 /// rail leaves, with air either side, so a line of prose stays readable and
 /// a wide window does not leave it stranded against the rail.
@@ -31,18 +33,20 @@ const PAGE_MAX_WIDTH: f32 = 720.0;
 const PAGE_PAD_X: f32 = 40.0;
 /// The page title and subtitle sit this far inside the block's edge, flush
 /// with the row text.
-const TITLE_INSET: f32 = 8.0;
+const TITLE_INSET: f32 = 0.0;
 /// The block the rows sit in: a faint fill, no outline, round corners.
 const BLOCK_RADIUS: f32 = 12.0;
-const BLOCK_FILL: f32 = 0.045;
-/// A row's text sits this far in from the block's edge; the hairline between
-/// rows starts there too.
+const BLOCK_FILL: f32 = 0.03;
+/// A row's text sits this far in from the block's edge.
 const ROW_INSET_X: f32 = 16.0;
-const ROW_PAD_Y: f32 = 12.0;
-/// Side of the app icon above the About page's title, and the corner its
-/// glow follows (the icon's own squircle).
-const LOGO_SIZE: f32 = 88.0;
-const LOGO_RADIUS: f32 = 20.0;
+const ROW_PAD_Y: f32 = 14.0;
+/// Side of the app's mark above the About page's title.
+const LOGO_SIZE: f32 = 96.0;
+/// An accent swatch with the ring around it: 16px of colour, a 2px gap and
+/// a 2px ring.
+const ACCENT_RING: f32 = 24.0;
+/// Colour slots in each graph palette's strip.
+const PALETTE_SWATCHES: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -61,6 +65,16 @@ impl Section {
             Self::History => "History",
             Self::Diff => "Diff",
             Self::About => "About",
+        }
+    }
+
+    /// What the page is for, under its title.
+    fn description(self) -> &'static str {
+        match self {
+            Self::Appearance => "Theme, accent, where the tabs go, and the graph's colours.",
+            Self::History => "The columns beside each commit, merging, and importing tabs.",
+            Self::Diff => "How changes are shown when a file is opened.",
+            Self::About => "The build you are running and how it stays up to date.",
         }
     }
 
@@ -89,6 +103,8 @@ pub struct SettingsPage {
 
 /// What the settings page asks the rest of the app to do.
 pub enum SettingsPageEvent {
+    /// Leave the settings for the tab that was open before them.
+    Back,
     /// Import the tabs GitKraken had open: `(paths, the one on screen)`.
     ImportGitKraken {
         paths: Vec<String>,
@@ -197,7 +213,40 @@ impl SettingsPage {
         cx.notify();
     }
 
+    /// The rail: the pages under a group label, and Back to app at the
+    /// bottom, since the tabs are not shown while the settings are open.
     fn render_rail(&mut self, theme: &Theme, corner: f32, cx: &mut Context<Self>) -> AnyElement {
+        let (lit, dim) = (theme.text, theme.text_muted);
+        let back = div()
+            .id("settings-back")
+            .group("settings-back")
+            .flex()
+            .items_center()
+            .gap_2()
+            .h(px(30.0))
+            .px_2()
+            .rounded_full()
+            .cursor_pointer()
+            .text_size(ui_rems(13.0))
+            .font_weight(gpui_kit::FontWeight::MEDIUM)
+            .text_color(dim)
+            .hover(move |style| style.bg(wash(0.08)).text_color(lit))
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsPageEvent::Back)))
+            .child(
+                div()
+                    .size(px(NAV_ICON))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        icons::icon(icons::ALT_ARROW_LEFT)
+                            .size(px(14.0))
+                            .text_color(dim)
+                            .group_hover("settings-back", move |style| style.text_color(lit)),
+                    ),
+            )
+            .child(div().pr_1().child("Back to app"));
         div()
             .w(px(RAIL_WIDTH))
             .rounded_bl(px(corner))
@@ -205,58 +254,74 @@ impl SettingsPage {
             .flex_none()
             .flex()
             .flex_col()
-            .gap(px(2.0))
-            .px_2()
             .bg(theme.surface)
             .border_r_1()
             // The same edge as the history's sidebar.
             .border_color(theme.border.opacity(0.6))
             .child(
                 div()
-                    .px_2()
-                    .pt(px(12.0))
-                    .pb(px(4.0))
-                    .text_size(ui_rems(11.0))
-                    .font_weight(gpui_kit::FontWeight::MEDIUM)
-                    .text_color(theme.text_muted.opacity(0.6))
-                    .child("Settings"),
-            )
-            .children(Section::ALL.into_iter().map(|item| {
-                let selected = item == self.section;
-                let id = SharedString::from(format!("settings-nav-{}", item.label()));
-                div()
-                    .id(id.clone())
+                    .id("settings-nav")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
                     .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(px(8.0))
+                    .flex_col()
+                    .gap_px()
                     .px_2()
-                    .py(px(6.0))
-                    .cursor_pointer()
-                    .text_size(ui_rems(13.0))
-                    .text_color(if selected {
-                        theme.text
-                    } else {
-                        theme.text_muted
-                    })
-                    .bg(if selected {
-                        wash(0.10)
-                    } else {
-                        motion::fade_color(&id, wash(0.0), wash(0.06))
-                    })
-                    .on_hover(motion::on_hover_fade(&id))
-                    .on_click(cx.listener(move |page, _, _, cx| {
-                        page.section = item;
-                        cx.notify();
-                    }))
+                    .pt_4()
                     .child(
-                        icons::icon(item.icon())
-                            .size(px(14.0))
-                            .text_color(theme.text_muted),
+                        div()
+                            .px_2()
+                            .pb_1()
+                            .text_size(ui_rems(12.0))
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(dim.opacity(0.7))
+                            .child("Settings"),
                     )
-                    .child(SharedString::from(item.label()))
-            }))
+                    .children(Section::ALL.into_iter().map(|item| {
+                        let selected = item == self.section;
+                        let id = SharedString::from(format!("settings-nav-{}", item.label()));
+                        div()
+                            .id(id.clone())
+                            .group(id.clone())
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .rounded(px(6.0))
+                            .px_2()
+                            .py(px(6.0))
+                            .cursor_pointer()
+                            .text_size(ui_rems(14.0))
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .map(|row| match selected {
+                                true => row.bg(wash(0.10)).text_color(lit),
+                                false => row
+                                    .text_color(dim)
+                                    .hover(move |style| style.bg(wash(0.05)).text_color(lit)),
+                            })
+                            .on_click(cx.listener(move |page, _, _, cx| {
+                                page.section = item;
+                                cx.notify();
+                            }))
+                            .child(
+                                icons::icon(item.icon())
+                                    .size(px(NAV_ICON))
+                                    .opacity(0.7)
+                                    .text_color(if selected { lit } else { dim })
+                                    .group_hover(id, move |style| style.text_color(lit)),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .child(SharedString::from(item.label())),
+                            )
+                    })),
+            )
+            .child(div().flex_none().px_2().pt_1().pb_2().child(back))
             .into_any_element()
     }
 
@@ -272,8 +337,8 @@ impl SettingsPage {
             .w_full()
             .flex()
             .flex_row()
-            .items_center()
-            .gap_4()
+            .items_start()
+            .gap_6()
             .py(px(ROW_PAD_Y))
             .child(
                 div()
@@ -281,7 +346,6 @@ impl SettingsPage {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap_px()
                     .child(
                         div()
                             .text_size(ui_rems(13.0))
@@ -291,12 +355,20 @@ impl SettingsPage {
                     )
                     .child(
                         div()
+                            .mt_1()
                             .text_size(ui_rems(12.0))
                             .text_color(theme.text_muted)
                             .child(description),
                     ),
             )
-            .child(div().flex_none().child(control))
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .min_h(px(20.0))
+                    .child(control),
+            )
             .into_any_element()
     }
 
@@ -316,7 +388,7 @@ impl SettingsPage {
             .flex_none()
             .rounded(px(10.0))
             .cursor_pointer()
-            .bg(if on { theme.accent } else { wash(0.14) })
+            .bg(if on { theme.accent } else { wash(0.20) })
             .flex()
             .items_center()
             .px(px(2.0))
@@ -328,11 +400,7 @@ impl SettingsPage {
                 div()
                     .size(px(16.0))
                     .rounded_full()
-                    .bg(if on {
-                        theme.on_accent
-                    } else {
-                        theme.text_muted
-                    })
+                    .bg(theme.on_accent)
                     // The knob is placed, not animated: a settings switch is
                     // read at a glance and never watched.
                     .ml(px(if on { 16.0 } else { 0.0 })),
@@ -350,29 +418,36 @@ impl SettingsPage {
         cx: &mut Context<Self>,
         apply: fn(&mut Settings, T),
     ) -> AnyElement {
-        let mut row = div().flex().flex_row().gap(px(4.0));
+        // Equal options in a hairline frame, the current one lit.
+        let mut row = div()
+            .flex()
+            .flex_row()
+            .gap(px(2.0))
+            .p(px(2.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(crate::ui::theme::hairline(0.10));
         for (value, label) in options.iter().copied() {
             let selected = value == current;
             let key = SharedString::from(format!("{id}-{label}"));
+            let lit = theme.text;
             row = row.child(
                 div()
                     .id(key.clone())
+                    .flex_1()
+                    .flex()
+                    .justify_center()
                     .px(px(10.0))
                     .py(px(4.0))
-                    .rounded_md()
+                    .rounded(px(5.0))
                     .cursor_pointer()
-                    .text_size(ui_rems(11.5))
-                    .text_color(if selected {
-                        theme.text
-                    } else {
-                        theme.text_muted
+                    .text_size(ui_rems(12.0))
+                    .map(|option| match selected {
+                        true => option.bg(wash(0.10)).text_color(lit),
+                        false => option
+                            .text_color(theme.text_muted)
+                            .hover(move |style| style.text_color(lit)),
                     })
-                    .bg(if selected {
-                        wash(0.12)
-                    } else {
-                        motion::fade_color(&key, wash(0.0), wash(0.07))
-                    })
-                    .on_hover(motion::on_hover_fade(&key))
                     .on_click(cx.listener(move |_, _, _, cx| {
                         settings::update(SavePolicy::Immediate, cx, move |settings| {
                             apply(settings, value)
@@ -394,24 +469,36 @@ impl SettingsPage {
         let accent_row = div()
             .flex()
             .flex_row()
-            .gap(px(6.0))
+            .gap(px(4.0))
             .children(AccentColor::ALL.into_iter().map(|accent| {
                 let choice = accent_choice(accent);
                 let selected = choice == settings.look.accent;
+                let id = SharedString::from(format!("settings-accent-{}", accent.label()));
+                // The current one is ringed rather than filled differently:
+                // the swatch has to keep showing its own colour. The ring
+                // stands off it by a gap of page, so it reads against any
+                // swatch, Mono's near white included.
                 div()
-                    .id(SharedString::from(format!(
-                        "settings-accent-{}",
-                        accent.label()
-                    )))
-                    .size(px(20.0))
+                    .id(id.clone())
+                    .size(px(ACCENT_RING))
+                    .flex_none()
+                    .p(px(2.0))
                     .rounded_full()
-                    .cursor_pointer()
-                    .bg(accent.swatch(appearance))
-                    // The current one is ringed rather than filled differently:
-                    // the swatch has to keep showing its own colour.
-                    .when(selected, |swatch| {
-                        swatch.border_2().border_color(theme.text)
+                    .border_2()
+                    .border_color(if selected {
+                        theme.text
+                    } else {
+                        motion::fade_color(&id, theme.text.opacity(0.0), theme.text.opacity(0.3))
                     })
+                    .on_hover(motion::on_hover_fade(&id))
+                    .cursor_pointer()
+                    .tooltip(crate::ui::tip::tip(accent.label()))
+                    .child(
+                        div()
+                            .size_full()
+                            .rounded_full()
+                            .bg(accent.swatch(appearance)),
+                    )
                     .on_click(cx.listener(move |_, _, _, cx| {
                         settings::update(SavePolicy::Immediate, cx, move |settings| {
                             settings.look.accent = choice;
@@ -515,10 +602,13 @@ impl SettingsPage {
         let options = LanePalette::ALL.into_iter().map(|palette| {
             let selected = palette == current;
             let id = SharedString::from(format!("settings-graph-palette-{}", palette.label()));
+            // The same number of slots in every card, so the strips line up;
+            // a short palette repeats, as the graph does past its last lane.
             let swatches = palette
                 .colors(appearance)
                 .iter()
-                .take(8)
+                .cycle()
+                .take(PALETTE_SWATCHES)
                 .map(|&color| div().h(px(14.0)).flex_1().bg(gpui_kit::rgb(color)));
             div()
                 .id(id.clone())
@@ -555,7 +645,10 @@ impl SettingsPage {
                     })
                 })
                 .child(
+                    // A fixed height, with the tick's room always kept, so the
+                    // chosen card's strip sits where its neighbours' do.
                     div()
+                        .h(px(16.0))
                         .flex()
                         .flex_row()
                         .items_center()
@@ -567,13 +660,12 @@ impl SettingsPage {
                             theme.text_muted
                         })
                         .child(palette.label())
-                        .when(selected, |label| {
-                            label.child(
-                                icons::icon(icons::CHECK)
-                                    .size(px(11.0))
-                                    .text_color(theme.text),
-                            )
-                        }),
+                        .child(
+                            icons::icon(icons::CHECK)
+                                .size(px(11.0))
+                                .text_color(theme.text)
+                                .opacity(if selected { 1.0 } else { 0.0 }),
+                        ),
                 )
                 .child(
                     div()
@@ -763,20 +855,16 @@ impl SettingsPage {
     fn render_about(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let platform = format!("{} · {}", platform_name(), std::env::consts::ARCH);
         let repository = env!("CARGO_PKG_REPOSITORY");
-        // The icon is a dark tile; on the dark page it would sink. A soft
-        // glow in the accent lifts it off the plane in either appearance.
+        // The icon's mark alone, in the page's ink: the tile around it is
+        // for the dock, and on the page it reads as a black box.
+        let mark = match theme.appearance.is_dark() {
+            true => crate::assets::MARK_LIGHT,
+            false => crate::assets::MARK_DARK,
+        };
         let logo = div()
             .size(px(LOGO_SIZE))
             .mb(px(16.0))
-            .rounded(px(LOGO_RADIUS))
-            .shadow(vec![gpui_kit::BoxShadow {
-                color: theme.accent.opacity(0.28),
-                offset: gpui_kit::point(px(0.0), px(10.0)),
-                blur_radius: px(36.0),
-                spread_radius: px(-4.0),
-                inset: false,
-            }])
-            .child(img(crate::assets::APP_ICON).size_full())
+            .child(img(mark).size_full())
             .into_any_element();
         self.page_under(
             Some(logo),
@@ -844,7 +932,7 @@ impl SettingsPage {
     }
 
     fn page(&self, title: &'static str, rows: Vec<AnyElement>, theme: &Theme) -> AnyElement {
-        self.page_under(None, title, None, rows, theme)
+        self.page_under(None, title, Some(self.section.description()), rows, theme)
     }
 
     /// A page with something drawn above its title, such as About's logo,
@@ -859,16 +947,22 @@ impl SettingsPage {
         theme: &Theme,
     ) -> AnyElement {
         let block = div()
-            .mt(px(20.0))
+            .mt(px(16.0))
+            .overflow_hidden()
             .rounded(px(BLOCK_RADIUS))
+            .border_1()
+            .border_color(crate::ui::theme::hairline(0.10))
             .bg(wash(BLOCK_FILL))
             .flex()
             .flex_col()
             .children(rows.into_iter().enumerate().map(|(index, row)| {
+                // The rule runs the card's full width; the row's text sits
+                // inside it.
                 div()
-                    .mx(px(ROW_INSET_X))
+                    .px(px(ROW_INSET_X))
                     .when(index > 0, |row| {
-                        row.border_t_1().border_color(theme.border.opacity(0.6))
+                        row.border_t_1()
+                            .border_color(crate::ui::theme::hairline(0.05))
                     })
                     .child(row)
             }));
@@ -904,13 +998,13 @@ impl SettingsPage {
                                 .child(
                                     div()
                                         .text_size(ui_rems(20.0))
-                                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                         .text_color(theme.text)
                                         .child(title),
                                 )
                                 .children(subtitle.map(|subtitle| {
                                     div()
-                                        .mt(px(4.0))
+                                        .mt(px(6.0))
                                         .text_size(ui_rems(13.0))
                                         .text_color(theme.text_muted)
                                         .child(subtitle)
@@ -967,6 +1061,7 @@ fn accent_choice(accent: AccentColor) -> Accent {
         AccentColor::Cyan => Accent::Cyan,
         AccentColor::Blue => Accent::Blue,
         AccentColor::Pink => Accent::Pink,
+        AccentColor::Mono => Accent::Mono,
         AccentColor::Custom { red, green, blue } => Accent::Custom { red, green, blue },
     }
 }
@@ -1046,6 +1141,7 @@ pub fn accent_color(choice: Accent) -> AccentColor {
         Accent::Cyan => AccentColor::Cyan,
         Accent::Blue => AccentColor::Blue,
         Accent::Pink => AccentColor::Pink,
+        Accent::Mono => AccentColor::Mono,
         Accent::Custom { red, green, blue } => AccentColor::Custom { red, green, blue },
     }
 }

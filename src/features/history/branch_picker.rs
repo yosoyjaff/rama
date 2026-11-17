@@ -1,8 +1,8 @@
 //! The branch selector above the graph: the branch that is out, and a
 //! dropdown to check out another one.
 //!
-//! The trigger is a small "branch" caption over the branch
-//! name and a caret. It opens a card with a search field and every local
+//! The trigger is a pill: the branch glyph, the branch's name and a caret.
+//! It opens a card with a search field and every local
 //! branch; the one that is out is highlighted, and picking another checks it
 //! out.
 
@@ -22,6 +22,8 @@ use crate::ui::{icons, motion};
 
 /// Width of the dropdown card.
 const CARD_WIDTH: f32 = 272.0;
+/// The trigger: a pill with the branch's glyph, its name and a chevron.
+const PILL_HEIGHT: f32 = 28.0;
 /// Past this the list scrolls.
 const LIST_MAX_HEIGHT: f32 = 480.0;
 
@@ -235,17 +237,21 @@ impl Render for BranchPicker {
             .flex_none()
             .max_w(px(260.0))
             .min_w_0()
+            .h(px(PILL_HEIGHT))
             .flex()
-            .flex_col()
-            .px(px(6.0))
-            .rounded(px(4.0))
+            .flex_row()
+            .items_center()
+            .gap(px(6.0))
+            .pl(px(10.0))
+            .pr(px(9.0))
+            .rounded_full()
             .cursor_pointer()
-            .when(open, |trigger| trigger.bg(wash(0.10)))
+            .when(open, |trigger| trigger.bg(wash(0.12)))
             .when(!open, |trigger| {
                 trigger
                     .bg(motion::fade_color(
                         "history-branch-picker",
-                        wash(0.0),
+                        wash(0.06),
                         wash(0.10),
                     ))
                     .on_hover(motion::on_hover_fade("history-branch-picker"))
@@ -263,40 +269,32 @@ impl Render for BranchPicker {
                 }
             }))
             .child(
-                div()
-                    .text_size(ui_rems(9.5))
-                    .line_height(px(11.0))
-                    .text_color(theme.text_muted)
-                    .child("branch"),
+                icons::icon(icons::GIT_BRANCH)
+                    .flex_none()
+                    .size(px(14.0))
+                    .text_color(theme.text_muted),
             )
             .child(
                 div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(5.0))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(ui_rems(13.0))
-                            .line_height(px(17.0))
-                            .text_color(if self.busy {
-                                theme.text_muted
-                            } else {
-                                theme.text
-                            })
-                            .child(self.branch.clone()),
-                    )
-                    .child(
-                        icons::icon(if open {
-                            icons::ALT_ARROW_UP
-                        } else {
-                            icons::ALT_ARROW_DOWN
-                        })
-                        .size(px(11.0))
-                        .text_color(theme.text_muted),
-                    ),
+                    .min_w_0()
+                    .truncate()
+                    .text_size(ui_rems(13.0))
+                    .text_color(if self.busy {
+                        theme.text_muted
+                    } else {
+                        theme.text
+                    })
+                    .child(self.branch.clone()),
+            )
+            .child(
+                icons::icon(if open {
+                    icons::ALT_ARROW_UP
+                } else {
+                    icons::ALT_ARROW_DOWN
+                })
+                .flex_none()
+                .size(px(12.0))
+                .text_color(theme.text_muted),
             )
             .when_some(menu, |trigger, (menu, closing)| {
                 trigger.child(popover::anchored_menu_below(
