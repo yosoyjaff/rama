@@ -378,6 +378,67 @@ pub struct Tabs {
     /// Names the user gave tabs, by repository path. A tab without one is
     /// named after its folder.
     pub names: BTreeMap<String, String>,
+    /// The tab groups, each a named, coloured run of tabs in the strip.
+    pub groups: Vec<TabGroup>,
+    /// Which group each grouped tab is in, by repository path.
+    pub grouped: BTreeMap<String, u64>,
+}
+
+/// A named, coloured run of project tabs that folds away behind its label.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TabGroup {
+    /// Stable for the group's life; tabs point at it.
+    pub id: u64,
+    /// May be blank: the label is then only its colour.
+    pub name: String,
+    pub color: GroupColor,
+    /// Folded to its label, its tabs hidden.
+    pub collapsed: bool,
+}
+
+/// A tab group's colour. The shades are theme roles.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GroupColor {
+    #[default]
+    Blue,
+    Red,
+    Yellow,
+    Green,
+    Pink,
+    Purple,
+    Cyan,
+    Orange,
+    Grey,
+}
+
+impl GroupColor {
+    pub const ALL: [Self; 9] = [
+        Self::Blue,
+        Self::Red,
+        Self::Yellow,
+        Self::Green,
+        Self::Pink,
+        Self::Purple,
+        Self::Cyan,
+        Self::Orange,
+        Self::Grey,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Grey => "Grey",
+            Self::Blue => "Blue",
+            Self::Red => "Red",
+            Self::Yellow => "Yellow",
+            Self::Green => "Green",
+            Self::Pink => "Pink",
+            Self::Purple => "Purple",
+            Self::Cyan => "Cyan",
+            Self::Orange => "Orange",
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]

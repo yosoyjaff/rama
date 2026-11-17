@@ -13,18 +13,23 @@
 //! panel. Switching away and back finds it where it was left, because the tab
 //! holds the entity and not a snapshot of it.
 
+use std::rc::Rc;
+
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, Render,
-    SharedString, Subscription, Window, div, prelude::*, px,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable,
+    IntoElement, Pixels, Point, Render, SharedString, Subscription, Window, div, prelude::*, px,
 };
 
 use super::history::pane::HistoryPane;
 use super::settings_page::{SettingsPage, SettingsPageEvent};
 use super::welcome::{Welcome, WelcomeEvent};
 use crate::recents;
-use crate::settings::{self, SavePolicy};
+use crate::settings::{self, GroupColor, SavePolicy, TabGroup};
 use crate::ui::icons;
-use crate::ui::tab_strip::{Tab, reveal, tab_strip};
+use crate::ui::popover::{self, Layer};
+use crate::ui::tab_strip::{
+    GroupLabel, Handler, Section as SectionLabel, StripEvents, StripItem, Tab, reveal, tab_strip,
+};
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::Theme;
 
@@ -41,6 +46,8 @@ enum Surface {
         /// start unloaded — only the one on screen loads, and the rest load
         /// the moment they are visited.
         loaded: bool,
+        /// The tab group it is in. A group's tabs sit next to each other.
+        group: Option<u64>,
     },
     Settings {
         view: Entity<SettingsPage>,
@@ -79,17 +86,54 @@ pub struct Workspace {
     tab_scroll: gpui_kit::ScrollHandle,
     /// The update row the shell hands down for Settings → About.
     update_panel: Option<gpui_kit::AnyView>,
-    /// The tab whose name is being edited in its chip.
+    /// The tab or group whose name is being edited in the strip.
     renaming: Option<Renaming>,
+    /// The tab groups, in no particular order: the strip's order is the
+    /// tabs'.
+    groups: Vec<TabGroup>,
+    /// A right click's menu on a tab or a group label.
+    menu: Layer<TabMenu>,
     _subscriptions: Vec<Subscription>,
 }
 
-/// A tab's name being edited in place.
+/// Something in the strip: a tab, by its index in `tabs`, a group, by its
+/// id, or a column's section label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    Tab(usize),
+    Group(u64),
+    Section(Section),
+}
+
+/// A column's sections: the groups, then the tabs in none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Section {
+    Groups,
+    Projects,
+}
+
+/// A name being edited in place.
 struct Renaming {
-    index: usize,
+    target: Target,
     input: Entity<TextInput>,
     _events: Subscription,
 }
+
+struct TabMenu {
+    at: Point<Pixels>,
+    target: Target,
+    /// A group's dropdown across the band, which lists its tabs first.
+    listing: bool,
+}
+
+/// The tab menu's width.
+const MENU_WIDTH: f32 = 220.0;
+/// A colour choice in a group's menu.
+const SWATCH: f32 = 16.0;
+/// The new-group button on the Groups heading.
+const NEW_GROUP_BUTTON: f32 = 20.0;
+/// Between a group's plate and its dropdown.
+const DROPDOWN_GAP: f32 = 4.0;
 
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -115,6 +159,8 @@ impl Workspace {
             tab_scroll: gpui_kit::ScrollHandle::new(),
             update_panel: None,
             renaming: None,
+            groups: Vec::new(),
+            menu: Layer::default(),
             _subscriptions: subscriptions,
         };
         // The tabs the last session left open come back — but UNLOADED: only
@@ -124,6 +170,8 @@ impl Workspace {
         let saved = settings::current(cx);
         let saved_repos = saved.tabs.open.clone();
         let saved_active = saved.tabs.active.clone();
+        let saved_groups = saved.tabs.groups.clone();
+        let saved_grouped = saved.tabs.grouped.clone();
         drop(saved);
         if saved_repos.is_empty() {
             // The repository the process was started in, when it is one:
@@ -149,9 +197,16 @@ impl Workspace {
                 workspace.activate(workspace.tabs.len() - 1, window, cx);
             }
         } else {
+            workspace.groups = saved_groups;
             for path in saved_repos {
+                let group = saved_grouped
+                    .get(&path)
+                    .copied()
+                    .filter(|&id| workspace.group(id).is_some());
                 workspace.push_repo(path, false, window, cx);
+                workspace.set_group_of(workspace.tabs.len() - 1, group);
             }
+            workspace.gather_groups();
             // The tab that was on screen comes back on screen — which is
             // what loads it.
             let target = saved_active.and_then(|active| {
@@ -186,6 +241,7 @@ impl Workspace {
             path,
             pane,
             loaded,
+            group: None,
         });
     }
 
@@ -204,9 +260,24 @@ impl Workspace {
             Some(Surface::Repo { path, .. }) => Some(path.clone()),
             _ => None,
         };
+        let grouped = self
+            .tabs
+            .iter()
+            .filter_map(|tab| match tab {
+                Surface::Repo {
+                    path,
+                    group: Some(id),
+                    ..
+                } => Some((path.clone(), *id)),
+                _ => None,
+            })
+            .collect();
+        let groups = self.groups.clone();
         settings::update(SavePolicy::Debounced, cx, |settings| {
             settings.tabs.open = repos;
             settings.tabs.active = active;
+            settings.tabs.groups = groups;
+            settings.tabs.grouped = grouped;
         });
     }
 
@@ -328,6 +399,13 @@ impl Workspace {
 
     fn activate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.active = index.min(self.tabs.len().saturating_sub(1));
+        // A tab can be opened from Home while its group is folded: the
+        // group opens to show it.
+        if let Some(id) = self.group_of(self.active)
+            && let Some(group) = self.group_mut(id)
+        {
+            group.collapsed = false;
+        }
         // A tab restored but never visited reads nothing until now: this is
         // the visit, and this is where its checkout loads.
         if let Some(Surface::Repo {
@@ -341,10 +419,13 @@ impl Workspace {
         }
         // Only on activation, never per frame: pinned every render, the chip
         // would snap back whenever the wheel moved the strip away from it.
-        if let Some(position) = self
-            .strip_indices()
+        // A tab inside a group across the band is its group's plate.
+        let group = self.group_of(self.active).map(Target::Group);
+        let entries = self.strip_entries(self.column(cx));
+        if let Some(position) = entries
             .iter()
-            .position(|&tab| tab == self.active)
+            .position(|&entry| entry == Target::Tab(self.active))
+            .or_else(|| entries.iter().position(|&entry| Some(entry) == group))
         {
             reveal(&self.tab_scroll, position, window);
         }
@@ -367,7 +448,11 @@ impl Workspace {
         }
         // Indices shift under an edit in progress: it ends unsaved.
         self.renaming = None;
+        self.close_menu(cx);
         self.tabs.remove(index);
+        if let Some(before) = self.before_settings {
+            self.before_settings = Some(shifted_by_removal(before, index));
+        }
         let next = if self.active >= index {
             self.active.saturating_sub(1)
         } else {
@@ -376,14 +461,21 @@ impl Workspace {
         self.activate(next, window, cx);
     }
 
-    /// Edit the name of tab `index` in its chip.
-    fn start_rename(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Surface::Repo { name, .. }) = self.tabs.get(index) else {
-            return;
+    /// Edit the name of a tab in its chip, or of a group in its label.
+    fn start_rename(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
+        let (name, placeholder) = match target {
+            Target::Tab(index) => match self.tabs.get(index) {
+                Some(Surface::Repo { name, .. }) => (name.clone(), "Tab name"),
+                _ => return,
+            },
+            Target::Group(id) => match self.group(id) {
+                Some(group) => (SharedString::from(group.name.clone()), "Group name"),
+                None => return,
+            },
+            Target::Section(_) => return,
         };
-        let name = name.clone();
         let input = cx.new(|cx| {
-            let mut input = TextInput::new("Tab name", window, cx)
+            let mut input = TextInput::new(placeholder, window, cx)
                 .with_text_size(11.5)
                 .compact();
             input.set_text(name, window, cx);
@@ -404,7 +496,7 @@ impl Workspace {
         let focus = input.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
         self.renaming = Some(Renaming {
-            index,
+            target,
             input,
             _events: events,
         });
@@ -424,9 +516,17 @@ impl Workspace {
         let Some(renaming) = self.renaming.take() else {
             return;
         };
-        if save {
-            let typed = renaming.input.read(cx).text().trim().to_string();
-            if let Some(Surface::Repo { path, name, .. }) = self.tabs.get_mut(renaming.index) {
+        let typed = renaming.input.read(cx).text().trim().to_string();
+        if save && let Target::Group(id) = renaming.target {
+            // A group always has a name: a blank one keeps the last.
+            if !typed.is_empty()
+                && let Some(group) = self.group_mut(id)
+            {
+                group.name = typed;
+                self.persist_tabs(cx);
+            }
+        } else if save && let Target::Tab(index) = renaming.target {
+            if let Some(Surface::Repo { path, name, .. }) = self.tabs.get_mut(index) {
                 let path = path.clone();
                 let given = (!typed.is_empty()).then_some(typed);
                 *name = SharedString::from(
@@ -443,7 +543,7 @@ impl Workspace {
                     }
                 });
             }
-            if renaming.index == self.active {
+            if index == self.active {
                 self.sync_window_title(window);
             }
         }
@@ -476,14 +576,268 @@ impl Workspace {
             .update(cx, |welcome, cx| welcome.set_open_paths(paths, cx));
     }
 
-    /// Strip position → index into `tabs`: the projects, in order.
-    fn strip_indices(&self) -> Vec<usize> {
-        self.tabs
-            .iter()
-            .enumerate()
-            .filter(|(_, surface)| matches!(surface, Surface::Repo { .. }))
-            .map(|(index, _)| index)
-            .collect()
+    /// Whether the tabs run down a column rather than across the band.
+    fn column(&self, cx: &App) -> bool {
+        settings::current(cx).look.tabs != settings::TabSide::Top
+    }
+
+    /// What the strip shows, in order. Down a column: the groups, each a
+    /// heading over its tabs unless folded, then the tabs in none. Across
+    /// the band: a plate per group, then the tabs in none.
+    fn strip_entries(&self, column: bool) -> Vec<Target> {
+        let loose = (0..self.tabs.len())
+            .filter(|&index| matches!(self.tabs[index], Surface::Repo { group: None, .. }));
+        let mut entries = Vec::new();
+        if column && !self.groups.is_empty() {
+            entries.push(Target::Section(Section::Groups));
+        }
+        for group in &self.groups {
+            entries.push(Target::Group(group.id));
+            if column && !group.collapsed {
+                entries.extend(self.member_indices(group.id).map(Target::Tab));
+            }
+        }
+        if column {
+            entries.push(Target::Section(Section::Projects));
+        }
+        entries.extend(loose.map(Target::Tab));
+        entries
+    }
+
+    // ── Groups ──────────────────────────────────────────────────────────────
+
+    fn group(&self, id: u64) -> Option<&TabGroup> {
+        self.groups.iter().find(|group| group.id == id)
+    }
+
+    fn group_mut(&mut self, id: u64) -> Option<&mut TabGroup> {
+        self.groups.iter_mut().find(|group| group.id == id)
+    }
+
+    /// The group tab `index` is in.
+    fn group_of(&self, index: usize) -> Option<u64> {
+        match self.tabs.get(index) {
+            Some(Surface::Repo { group, .. }) => *group,
+            _ => None,
+        }
+    }
+
+    fn set_group_of(&mut self, index: usize, to: Option<u64>) {
+        if let Some(Surface::Repo { group, .. }) = self.tabs.get_mut(index) {
+            *group = to;
+        }
+    }
+
+    /// The first and last index of a group's tabs.
+    fn group_span(&self, id: u64) -> Option<(usize, usize)> {
+        let members = || (0..self.tabs.len()).filter(|&index| self.group_of(index) == Some(id));
+        Some((members().next()?, members().last()?))
+    }
+
+    /// The indices of a group's tabs, in order.
+    fn member_indices(&self, id: u64) -> impl Iterator<Item = usize> + '_ {
+        (0..self.tabs.len()).filter(move |&index| self.group_of(index) == Some(id))
+    }
+
+    /// Bring each group's tabs together after its first, the rest keeping
+    /// their order. Only for tabs read back from a file, which could have
+    /// been edited by hand: every change made here keeps groups together.
+    fn gather_groups(&mut self) {
+        let mut order: Vec<usize> = Vec::with_capacity(self.tabs.len());
+        for index in 0..self.tabs.len() {
+            if order.contains(&index) {
+                continue;
+            }
+            order.push(index);
+            if let Some(id) = self.group_of(index) {
+                order.extend(
+                    (index + 1..self.tabs.len()).filter(|&other| self.group_of(other) == Some(id)),
+                );
+            }
+        }
+        let mut slots: Vec<Option<Surface>> = self.tabs.drain(..).map(Some).collect();
+        self.tabs = order
+            .into_iter()
+            .filter_map(|index| slots[index].take())
+            .collect();
+        self.active = 0;
+    }
+
+    /// Move tab `from` so it ends up at index `to`, with the active tab and
+    /// Back to app following the tabs they point at.
+    fn move_tab(&mut self, from: usize, to: usize) {
+        if from == to || from >= self.tabs.len() || to >= self.tabs.len() {
+            return;
+        }
+        self.renaming = None;
+        let surface = self.tabs.remove(from);
+        self.tabs.insert(to, surface);
+        self.active = shifted_by_move(self.active, from, to);
+        self.before_settings = self
+            .before_settings
+            .map(|index| shifted_by_move(index, from, to));
+    }
+
+    /// Take tab `index` out of its group, to just after the group's other
+    /// tabs. Returns where the tab is now.
+    fn leave_group(&mut self, index: usize) -> usize {
+        let Some(id) = self.group_of(index) else {
+            return index;
+        };
+        let (_, last) = self.group_span(id).unwrap_or((index, index));
+        self.move_tab(index, last);
+        self.set_group_of(last, None);
+        last
+    }
+
+    /// Add an empty group, last, and edit its name. A group stays until it
+    /// is ungrouped, empty or not.
+    fn create_group(&mut self, window: &mut Window, cx: &mut Context<Self>) -> u64 {
+        let id = self.groups.iter().map(|group| group.id).max().unwrap_or(0) + 1;
+        // A colour no other group has, while there is one.
+        let color = GroupColor::ALL
+            .into_iter()
+            .find(|&color| !self.groups.iter().any(|group| group.color == color))
+            .unwrap_or(GroupColor::ALL[self.groups.len() % GroupColor::ALL.len()]);
+        let taken = |name: &str| self.groups.iter().any(|group| group.name == name);
+        let name = std::iter::once("New group".to_string())
+            .chain((2..).map(|n| format!("New group {n}")))
+            .find(|name| !taken(name))
+            .unwrap_or_default();
+        self.groups.push(TabGroup {
+            id,
+            name,
+            color,
+            collapsed: false,
+        });
+        self.persist_tabs(cx);
+        self.start_rename(Target::Group(id), window, cx);
+        id
+    }
+
+    /// Put tab `index` in a new group of its own.
+    fn new_group(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.tabs.get(index), Some(Surface::Repo { .. })) {
+            return;
+        }
+        let index = self.leave_group(index);
+        let id = self.create_group(window, cx);
+        self.set_group_of(index, Some(id));
+        self.persist_tabs(cx);
+    }
+
+    /// Move tab `index` to the end of group `id`.
+    fn move_to_group(&mut self, index: usize, id: u64, cx: &mut Context<Self>) {
+        if self.group_of(index) == Some(id) || self.group(id).is_none() {
+            return;
+        }
+        let index = self.leave_group(index);
+        // Into an empty group it stays where it is.
+        let to = match self.group_span(id) {
+            Some((_, last)) if index > last => last + 1,
+            Some((_, last)) => last,
+            None => index,
+        };
+        self.move_tab(index, to);
+        self.set_group_of(to, Some(id));
+        if let Some(group) = self.group_mut(id) {
+            group.collapsed = false;
+        }
+        self.persist_tabs(cx);
+        cx.notify();
+    }
+
+    fn remove_from_group(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.leave_group(index);
+        self.persist_tabs(cx);
+        cx.notify();
+    }
+
+    /// Dissolve a group; its tabs stay where they are.
+    fn ungroup(&mut self, id: u64, cx: &mut Context<Self>) {
+        for index in 0..self.tabs.len() {
+            if self.group_of(index) == Some(id) {
+                self.set_group_of(index, None);
+            }
+        }
+        self.groups.retain(|group| group.id != id);
+        self.persist_tabs(cx);
+        cx.notify();
+    }
+
+    fn close_group(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let members: Vec<usize> = (0..self.tabs.len())
+            .filter(|&index| self.group_of(index) == Some(id))
+            .collect();
+        for index in members.into_iter().rev() {
+            self.close(index, window, cx);
+        }
+        self.groups.retain(|group| group.id != id);
+        self.persist_tabs(cx);
+        cx.notify();
+    }
+
+    fn set_group_color(&mut self, id: u64, color: GroupColor, cx: &mut Context<Self>) {
+        if let Some(group) = self.group_mut(id) {
+            group.color = color;
+            self.persist_tabs(cx);
+            cx.notify();
+        }
+    }
+
+    /// Fold a group down to its heading, or open it again.
+    fn toggle_group(&mut self, id: u64, cx: &mut Context<Self>) {
+        if let Some(group) = self.group_mut(id) {
+            group.collapsed = !group.collapsed;
+            self.persist_tabs(cx);
+            cx.notify();
+        }
+    }
+
+    // ── Menu ────────────────────────────────────────────────────────────────
+
+    fn open_menu(&mut self, target: Target, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if matches!(target, Target::Section(_)) {
+            return;
+        }
+        self.menu.open(TabMenu {
+            at,
+            target,
+            listing: false,
+        });
+        cx.notify();
+    }
+
+    /// A group's dropdown, hanging under its plate at strip position
+    /// `position`. A second click on the plate closes it.
+    fn toggle_dropdown(&mut self, id: u64, position: usize, cx: &mut Context<Self>) {
+        // The press on the plate has already dismissed an open dropdown (a
+        // press outside a menu closes it), and the click lands while it
+        // fades: that click is the one closing it, not opening it again.
+        let shown = self
+            .menu
+            .shown()
+            .is_some_and(|menu| menu.listing && menu.target == Target::Group(id));
+        if shown {
+            self.close_menu(cx);
+            return;
+        }
+        // Plates are laid out unscrolled; the strip's offset moves them.
+        let Some(plate) = self.tab_scroll.bounds_for_item(position) else {
+            return;
+        };
+        let offset = self.tab_scroll.offset();
+        let at = gpui_kit::point(plate.left() + offset.x, plate.bottom() + px(DROPDOWN_GAP));
+        self.menu.open(TabMenu {
+            at,
+            target: Target::Group(id),
+            listing: true,
+        });
+        cx.notify();
+    }
+
+    fn close_menu(&mut self, cx: &mut Context<Self>) {
+        self.menu.dismiss(cx, |workspace| &mut workspace.menu);
     }
 
     /// Whether the home screen is what the window shows.
@@ -506,57 +860,145 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let active = self.active;
-        let shown = self.strip_indices();
-        let tabs: Vec<Tab> = shown
-            .iter()
-            .map(|&index| (index, &self.tabs[index]))
-            .map(|(index, surface)| Tab {
-                id: ("workspace-tab", index).into(),
-                group: SharedString::from(format!("workspace-tab-{index}")),
-                // A tab names the REPOSITORY: no branch, no badge.
-                title: surface.title(),
-                icon: Some(surface.icon()),
-                active: index == active,
-                closable: index != 0,
-                editor: self
-                    .renaming
-                    .as_ref()
-                    .filter(|renaming| renaming.index == index)
-                    .map(|renaming| self.render_rename(&renaming.input, cx)),
-            })
-            .collect();
+        let theme = Theme::of(cx).clone();
+        let entries = self.strip_entries(column);
+        let editing = |target: Target| {
+            self.renaming
+                .as_ref()
+                .filter(|renaming| renaming.target == target)
+                .map(|renaming| renaming.input.clone())
+        };
+        // Down a column the + heads the Projects section, not the end.
+        let (mut section_button, trailing) = match column {
+            true => (trailing, None),
+            false => (None, trailing),
+        };
+        let mut items: Vec<StripItem> = Vec::with_capacity(entries.len());
+        for &entry in &entries {
+            items.push(match entry {
+                Target::Tab(index) => {
+                    let surface = &self.tabs[index];
+                    let editor = editing(entry).map(|input| self.render_rename(&input, cx));
+                    StripItem::Tab(Tab {
+                        id: ("workspace-tab", index).into(),
+                        group: SharedString::from(format!("workspace-tab-{index}")),
+                        // A tab names the REPOSITORY: no branch, no badge.
+                        title: surface.title(),
+                        icon: Some(surface.icon()),
+                        active: index == active,
+                        closable: index != 0,
+                        editor,
+                        nested: self.group_of(index).is_some(),
+                    })
+                }
+                Target::Group(id) => {
+                    let editor = editing(entry).map(|input| self.render_rename(&input, cx));
+                    let group = self.group(id).cloned().unwrap_or_default();
+                    let on_screen = self.group_of(active) == Some(id);
+                    StripItem::Group(GroupLabel {
+                        id: ElementId::Name(format!("workspace-group-{id}").into()),
+                        name: group.name.into(),
+                        color: theme.tab_group(group.color),
+                        collapsed: group.collapsed,
+                        active: on_screen,
+                        current: on_screen.then(|| self.tabs[active].title()),
+                        editor,
+                    })
+                }
+                Target::Section(section) => StripItem::Section(match section {
+                    Section::Groups => SectionLabel {
+                        label: "Groups".into(),
+                        action: Some(self.render_new_group_button(cx)),
+                    },
+                    Section::Projects => SectionLabel {
+                        label: "Projects".into(),
+                        action: section_button.take(),
+                    },
+                }),
+            });
+        }
 
-        let select_handle = cx.entity().downgrade();
-        let close_handle = select_handle.clone();
-        let rename_handle = select_handle.clone();
-        let close_shown = shown.clone();
-        let rename_shown = shown.clone();
-        tab_strip(
-            tabs,
-            &self.tab_scroll,
-            trailing,
-            column,
-            move |position, window, cx: &mut App| {
-                let index = shown[position];
-                select_handle
-                    .update(cx, |workspace, cx| workspace.activate(index, window, cx))
-                    .ok();
-            },
-            move |position, window, cx: &mut App| {
-                let index = rename_shown[position];
-                rename_handle
-                    .update(cx, |workspace, cx| {
-                        workspace.start_rename(index, window, cx)
+        let entries = Rc::new(entries);
+        let handle = cx.entity().downgrade();
+        let handler = |act: fn(&mut Self, Target, &mut Window, &mut Context<Self>)| -> Handler {
+            let (handle, entries) = (handle.clone(), entries.clone());
+            Rc::new(move |position, window, cx: &mut App| {
+                if let Some(&entry) = entries.get(position) {
+                    handle
+                        .update(cx, |workspace, cx| act(workspace, entry, window, cx))
+                        .ok();
+                }
+            })
+        };
+        let select: Handler = {
+            let (handle, entries) = (handle.clone(), entries.clone());
+            Rc::new(move |position, window, cx: &mut App| {
+                let Some(&entry) = entries.get(position) else {
+                    return;
+                };
+                handle
+                    .update(cx, |workspace, cx| match entry {
+                        Target::Tab(index) => workspace.activate(index, window, cx),
+                        Target::Group(id) if column => workspace.toggle_group(id, cx),
+                        Target::Group(id) => workspace.toggle_dropdown(id, position, cx),
+                        Target::Section(_) => {}
                     })
                     .ok();
+            })
+        };
+        let events = StripEvents {
+            select,
+            rename: handler(|workspace, entry, window, cx| {
+                workspace.start_rename(entry, window, cx)
+            }),
+            close: handler(|workspace, entry, window, cx| {
+                if let Target::Tab(index) = entry {
+                    workspace.close(index, window, cx);
+                }
+            }),
+            menu: {
+                let (handle, entries) = (handle.clone(), entries.clone());
+                Rc::new(move |position, at, _, cx: &mut App| {
+                    if let Some(&entry) = entries.get(position) {
+                        handle
+                            .update(cx, |workspace, cx| workspace.open_menu(entry, at, cx))
+                            .ok();
+                    }
+                })
             },
-            move |position, window, cx: &mut App| {
-                let index = close_shown[position];
-                close_handle
-                    .update(cx, |workspace, cx| workspace.close(index, window, cx))
-                    .ok();
-            },
-        )
+        };
+        tab_strip(items, &self.tab_scroll, trailing, column, events)
+    }
+
+    /// The button on the Groups heading: a new, empty group.
+    fn render_new_group_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::of(cx);
+        let (rest, lit) = (theme.text_muted, theme.text);
+        let id = "workspace-new-group";
+        div()
+            .id(id)
+            .group(id)
+            .size(px(NEW_GROUP_BUTTON))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.0))
+            .cursor_pointer()
+            .hover(|style| style.bg(crate::ui::theme::wash(0.10)))
+            .tooltip(crate::ui::tip::tip("New group"))
+            .on_click(cx.listener(|workspace, _, window, cx| {
+                cx.stop_propagation();
+                workspace.create_group(window, cx);
+            }))
+            .child(
+                icons::icon(icons::FOLDER_01)
+                    .flex_none()
+                    .size(px(14.0))
+                    .text_color(rest)
+                    .group_hover(id, move |style| style.text_color(lit)),
+            )
+            .into_any_element()
     }
 }
 
@@ -581,6 +1023,202 @@ impl Workspace {
             .child(input.clone())
             .into_any_element()
     }
+
+    /// The right click's menu on a tab or a group label.
+    fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.menu.shown()?;
+        let (at, target, listing) = (menu.at, menu.target, menu.listing);
+        let closing = self.menu.leaving_since();
+        let theme = Theme::of(cx).clone();
+        let row = |id: String, label: String, danger: bool| {
+            popover::menu_row(&theme, false, SharedString::from(id.clone()))
+                .id(ElementId::Name(id.into()))
+                .when(danger, |row| row.text_color(theme.danger_muted))
+                .child(div().flex_1().min_w_0().truncate().child(label))
+        };
+        let mut card = popover::popover_card(&theme)
+            .w(px(MENU_WIDTH))
+            .on_mouse_down_out(cx.listener(|workspace, _, _, cx| workspace.close_menu(cx)));
+        match target {
+            Target::Tab(index) => {
+                let current = self.group_of(index);
+                card = card.child(
+                    row(
+                        "tab-menu-new-group".into(),
+                        "Add to new group".into(),
+                        false,
+                    )
+                    .on_click(cx.listener(move |workspace, _, window, cx| {
+                        workspace.close_menu(cx);
+                        workspace.new_group(index, window, cx);
+                    })),
+                );
+                for group in self.groups.iter().filter(|group| Some(group.id) != current) {
+                    let id = group.id;
+                    let name = match group.name.trim() {
+                        "" => format!("{} group", group.color.label()),
+                        name => name.to_string(),
+                    };
+                    card = card.child(
+                        row(
+                            format!("tab-menu-move-{id}"),
+                            format!("Move to {name}"),
+                            false,
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .size(px(8.0))
+                                .rounded_full()
+                                .bg(theme.tab_group(group.color)),
+                        )
+                        .on_click(cx.listener(
+                            move |workspace, _, _, cx| {
+                                workspace.close_menu(cx);
+                                workspace.move_to_group(index, id, cx);
+                            },
+                        )),
+                    );
+                }
+                if current.is_some() {
+                    card = card.child(
+                        row("tab-menu-ungroup".into(), "Remove from group".into(), false).on_click(
+                            cx.listener(move |workspace, _, _, cx| {
+                                workspace.close_menu(cx);
+                                workspace.remove_from_group(index, cx);
+                            }),
+                        ),
+                    );
+                }
+                card = card.child(popover::menu_separator()).child(
+                    row("tab-menu-close".into(), "Close tab".into(), false).on_click(cx.listener(
+                        move |workspace, _, window, cx| {
+                            workspace.close_menu(cx);
+                            workspace.close(index, window, cx);
+                        },
+                    )),
+                );
+            }
+            Target::Section(_) => return None,
+            Target::Group(id) => {
+                // The dropdown across the band: the group's tabs, the one on
+                // screen marked, then what the group itself can do.
+                if listing {
+                    let members: Vec<usize> = self.member_indices(id).collect();
+                    if members.is_empty() {
+                        card = card.child(
+                            div()
+                                .px(px(8.0))
+                                .py(px(6.0))
+                                .text_color(theme.text_faint)
+                                .child("No projects in this group"),
+                        );
+                    }
+                    for index in members {
+                        let surface = &self.tabs[index];
+                        let key = format!("tab-menu-tab-{index}");
+                        card = card.child(
+                            popover::menu_row(&theme, index == self.active, key.clone())
+                                .id(ElementId::Name(key.into()))
+                                .child(
+                                    icons::icon(surface.icon())
+                                        .flex_none()
+                                        .size(px(14.0))
+                                        .text_color(theme.text_muted),
+                                )
+                                .child(div().flex_1().min_w_0().truncate().child(surface.title()))
+                                .on_click(cx.listener(move |workspace, _, window, cx| {
+                                    workspace.close_menu(cx);
+                                    workspace.activate(index, window, cx);
+                                })),
+                        );
+                    }
+                    card = card.child(popover::menu_separator());
+                }
+                let chosen = self.group(id).map(|group| group.color);
+                let mut swatches = div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(6.0))
+                    .px(px(8.0))
+                    .py(px(6.0));
+                for color in GroupColor::ALL {
+                    let tone = theme.tab_group(color);
+                    swatches = swatches.child(
+                        div()
+                            .id(ElementId::Name(
+                                format!("tab-menu-color-{}", color.label()).into(),
+                            ))
+                            .size(px(SWATCH))
+                            .rounded_full()
+                            .bg(tone)
+                            .cursor_pointer()
+                            .border_2()
+                            .border_color(if chosen == Some(color) {
+                                theme.text
+                            } else {
+                                tone
+                            })
+                            .tooltip(crate::ui::tip::tip(color.label()))
+                            .on_click(cx.listener(move |workspace, _, _, cx| {
+                                workspace.set_group_color(id, color, cx);
+                            })),
+                    );
+                }
+                card = card
+                    .child(
+                        row("tab-menu-rename-group".into(), "Rename group".into(), false).on_click(
+                            cx.listener(move |workspace, _, window, cx| {
+                                workspace.close_menu(cx);
+                                workspace.start_rename(Target::Group(id), window, cx);
+                            }),
+                        ),
+                    )
+                    .child(swatches)
+                    .child(popover::menu_separator())
+                    .child(
+                        row("tab-menu-ungroup-all".into(), "Ungroup".into(), false).on_click(
+                            cx.listener(move |workspace, _, _, cx| {
+                                workspace.close_menu(cx);
+                                workspace.ungroup(id, cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        row("tab-menu-close-group".into(), "Close group".into(), true).on_click(
+                            cx.listener(move |workspace, _, window, cx| {
+                                workspace.close_menu(cx);
+                                workspace.close_group(id, window, cx);
+                            }),
+                        ),
+                    );
+            }
+        }
+        Some(popover::menu_at(
+            "workspace-tab-menu",
+            at,
+            card.into_any_element(),
+            closing,
+        ))
+    }
+}
+
+/// Where index `index` ends up once the tab at `from` moves to `to`.
+fn shifted_by_move(index: usize, from: usize, to: usize) -> usize {
+    if index == from {
+        to
+    } else if from < index && index <= to {
+        index - 1
+    } else if to <= index && index < from {
+        index + 1
+    } else {
+        index
+    }
+}
+
+/// Where index `index` ends up once the tab at `removed` closes.
+fn shifted_by_removal(index: usize, removed: usize) -> usize {
+    if index > removed { index - 1 } else { index }
 }
 
 impl Focusable for Workspace {
@@ -599,12 +1237,14 @@ impl Render for Workspace {
             // home is always there.
             _ => self.welcome.clone().into_any_element(),
         };
+        let menu = self.render_menu(cx);
         div()
             .track_focus(&self.focus_handle)
             .size_full()
             .rounded_b(px(corner))
             .bg(Theme::of(cx).bg)
             .child(content)
+            .children(menu)
     }
 }
 
@@ -680,7 +1320,7 @@ mod tests {
                               save,
                               window: &mut Window,
                               cx: &mut Context<Workspace>| {
-                    workspace.start_rename(1, window, cx);
+                    workspace.start_rename(Target::Tab(1), window, cx);
                     let input = workspace.renaming.as_ref().unwrap().input.clone();
                     input.update(cx, |input, cx| input.set_text(text.to_string(), window, cx));
                     workspace.finish_rename(save, true, window, cx);
@@ -699,6 +1339,136 @@ mod tests {
                 assert!(settings::current(cx).tabs.names.is_empty());
             })
             .expect("window update");
+    }
+
+    fn groups_of(workspace: &Workspace) -> Vec<Option<u64>> {
+        (0..workspace.tabs.len())
+            .map(|index| workspace.group_of(index))
+            .collect()
+    }
+
+    #[gpui_kit::test]
+    fn a_tab_moved_into_a_group_lands_beside_its_tabs(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                for name in ["one", "two", "three"] {
+                    workspace.open_repository(format!("/repos/{name}"), window, cx);
+                }
+                workspace.new_group(1, window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                let id = workspace.groups[0].id;
+                assert_eq!(workspace.groups[0].name, "New group");
+                workspace.move_to_group(3, id, cx);
+
+                assert_eq!(titles(workspace), vec!["Home", "one", "three", "two"]);
+                assert_eq!(groups_of(workspace), vec![None, Some(id), Some(id), None]);
+                assert_eq!(workspace.active, 2, "the active tab follows its move");
+                assert_eq!(
+                    workspace.strip_entries(true),
+                    vec![
+                        Target::Section(Section::Groups),
+                        Target::Group(id),
+                        Target::Tab(1),
+                        Target::Tab(2),
+                        Target::Section(Section::Projects),
+                        Target::Tab(3),
+                    ]
+                );
+                // Across the band the group is one plate.
+                assert_eq!(
+                    workspace.strip_entries(false),
+                    vec![Target::Group(id), Target::Tab(3)]
+                );
+
+                workspace.remove_from_group(1, cx);
+                assert_eq!(titles(workspace), vec!["Home", "three", "one", "two"]);
+                assert_eq!(groups_of(workspace), vec![None, Some(id), None, None]);
+
+                workspace.remove_from_group(1, cx);
+                assert_eq!(workspace.groups.len(), 1, "an emptied group stays");
+                workspace.ungroup(id, cx);
+                assert!(workspace.groups.is_empty());
+            })
+            .expect("window update");
+    }
+
+    #[gpui_kit::test]
+    fn a_folded_group_hides_its_tabs_down_the_column(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace.open_repository("/repos/one".into(), window, cx);
+                workspace.open_repository("/repos/two".into(), window, cx);
+                workspace.new_group(1, window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                let id = workspace.groups[0].id;
+
+                workspace.toggle_group(id, cx);
+                assert_eq!(
+                    workspace.strip_entries(true),
+                    vec![
+                        Target::Section(Section::Groups),
+                        Target::Group(id),
+                        Target::Section(Section::Projects),
+                        Target::Tab(2),
+                    ]
+                );
+
+                // Opening a folded tab from Home unfolds its group.
+                workspace.open_repository("/repos/one".into(), window, cx);
+                assert!(!workspace.groups[0].collapsed);
+            })
+            .expect("window update");
+    }
+
+    #[gpui_kit::test]
+    fn closing_a_group_closes_its_tabs_and_forgets_it(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace.open_repository("/repos/one".into(), window, cx);
+                workspace.open_repository("/repos/two".into(), window, cx);
+                workspace.new_group(2, window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                let id = workspace.groups[0].id;
+                workspace.move_to_group(1, id, cx);
+
+                workspace.close_group(id, window, cx);
+                assert_eq!(titles(workspace), vec!["Home"]);
+                assert!(workspace.groups.is_empty());
+                assert!(settings::current(cx).tabs.groups.is_empty());
+            })
+            .expect("window update");
+    }
+
+    #[gpui_kit::test]
+    fn a_new_group_starts_empty_with_a_name_of_its_own(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace.create_group(window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                workspace.create_group(window, cx);
+                // A blank name keeps the one it had.
+                let input = workspace.renaming.as_ref().unwrap().input.clone();
+                input.update(cx, |input, cx| input.set_text("  ".to_string(), window, cx));
+                workspace.finish_rename(true, true, window, cx);
+
+                let names: Vec<&str> = workspace.groups.iter().map(|g| g.name.as_str()).collect();
+                assert_eq!(names, vec!["New group", "New group 2"]);
+                assert_ne!(workspace.groups[0].color, workspace.groups[1].color);
+            })
+            .expect("window update");
+    }
+
+    #[test]
+    fn a_move_shifts_the_tabs_between_its_ends() {
+        assert_eq!(shifted_by_move(1, 1, 3), 3);
+        assert_eq!(shifted_by_move(2, 1, 3), 1);
+        assert_eq!(shifted_by_move(3, 1, 3), 2);
+        assert_eq!(shifted_by_move(1, 3, 1), 2);
+        assert_eq!(shifted_by_move(4, 1, 3), 4);
     }
 
     #[gpui_kit::test]
