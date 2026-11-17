@@ -4,6 +4,35 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.7.0] - 2026-11-16
+
+### Added
+- The project tabs can run down a sidebar on the left or the right, from
+  Settings → Appearance → Tabs. The sidebar lists them under a Projects
+  heading, with a + to open another.
+- A button in the history's header hides or shows the sidebar of branches,
+  remotes, tags and stashes; the choice is remembered.
+- Ctrl+F (Cmd+F on macOS) opens the commit search. Enter goes to the next
+  match, Shift+Enter to the previous one, Escape closes it.
+- A Mono accent: near white on the dark theme, near black on the light one.
+- Settings has Back to app at the bottom of its rail.
+
+### Changed
+- The branch, the toolbar and search share one band above the graph. The
+  branch is a pill, and search drops down a find card under its button.
+- Tabs show their project's icon without a tile around it.
+- While Settings is open the tabs are hidden. Its pages have a description
+  under the title and their rows sit in an outlined card; choices are a
+  segmented control.
+- About shows the app's mark on its own, larger, in the page's colour.
+- The window buttons have new glyphs, and closing no longer turns red on
+  hover on Linux.
+- The accent swatches are ringed, so the chosen one is clear in any colour.
+
+### Fixed
+- The + by the tabs opens the folder picker; it used to only go Home.
+- Graph palettes with fewer colours line up with the others in Settings.
+
 ## [0.6.0] - 2026-11-16
 
 ### Added
