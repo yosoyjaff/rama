@@ -631,7 +631,7 @@ impl Workspace {
     /// The first and last index of a group's tabs.
     fn group_span(&self, id: u64) -> Option<(usize, usize)> {
         let members = || (0..self.tabs.len()).filter(|&index| self.group_of(index) == Some(id));
-        Some((members().next()?, members().last()?))
+        Some((members().next()?, members().next_back()?))
     }
 
     /// The indices of a group's tabs, in order.
