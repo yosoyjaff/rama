@@ -85,6 +85,21 @@ pub struct Look {
     pub mode: Mode,
     pub accent: Accent,
     pub palette: Palette,
+    /// Where the open projects' tabs are listed.
+    pub tabs: TabSide,
+}
+
+/// The edge of the window the project tabs run along.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TabSide {
+    /// Across the title band.
+    #[default]
+    Top,
+    /// A column down the left edge.
+    Left,
+    /// A column down the right edge.
+    Right,
 }
 
 // ── History ─────────────────────────────────────────────────────────────────
@@ -528,6 +543,7 @@ mod tests {
             ColumnId::Date.default_width()
         );
         assert!(read.history.columns.author.shown);
+        assert_eq!(read.look.tabs, TabSide::Top, "tabs stay across the top");
         assert_eq!(read.diff, Diff::default());
     }
 

@@ -9,6 +9,8 @@
 //! The strip knows nothing about what a tab contains: it takes what to draw
 //! and reports which plate was pressed.
 //!
+//! The same plates can instead stack down a column, as a sidebar.
+//!
 //! When even the narrowest plates do not fit, the strip scrolls, with nothing
 //! drawn for it — no bar, no shadow: the wheel moves the plates, and the
 //! owner brings the active one into view with [`reveal`], on the
@@ -64,21 +66,35 @@ pub fn reveal(scroll: &gpui_kit::ScrollHandle, index: usize, window: &Window) {
         });
         return;
     }
+    // The strip runs across the band or down a column. The plates fill the
+    // other axis, so it is always in view there and only the run moves.
     let mut offset = scroll.offset();
-    offset.x = match scroll.bounds_for_item(index) {
-        Some(plate) => reveal_offset(
-            f32::from(plate.left() - viewport.left()),
-            f32::from(plate.right() - viewport.left()),
-            f32::from(offset.x),
-            f32::from(viewport.size.width),
-        ),
-        None => -f32::MAX,
+    match scroll.bounds_for_item(index) {
+        Some(plate) => {
+            offset.x = reveal_offset(
+                f32::from(plate.left() - viewport.left()),
+                f32::from(plate.right() - viewport.left()),
+                f32::from(offset.x),
+                f32::from(viewport.size.width),
+            )
+            .into();
+            offset.y = reveal_offset(
+                f32::from(plate.top() - viewport.top()),
+                f32::from(plate.bottom() - viewport.top()),
+                f32::from(offset.y),
+                f32::from(viewport.size.height),
+            )
+            .into();
+        }
+        None => {
+            offset.x = (-f32::MAX).into();
+            offset.y = (-f32::MAX).into();
+        }
     }
-    .into();
     scroll.set_offset(offset);
 }
 
-/// The horizontal offset that shows a plate spanning `left..right` (in the
+/// The offset along one axis that shows a plate spanning `left..right` (in the
 /// strip's unscrolled coordinates) in a viewport `viewport` wide, from
 /// offset `current`: unchanged if it is already in full view, else the plate
 /// lands flush against the nearer edge.
@@ -111,11 +127,14 @@ pub struct Tab {
 /// Draw the strip. `on_select`, `on_rename` (a double click) and `on_close`
 /// receive the tab's index; `scroll` is the strip's own offset, which
 /// [`reveal`] moves just far enough to show a plate. `trailing` follows the
-/// last plate, as close to it as the plates are to each other.
+/// last plate, as close to it as the plates are to each other. `column`
+/// stacks the plates down a sidebar, each as wide as it, instead of across
+/// the band.
 pub fn tab_strip(
     tabs: Vec<Tab>,
     scroll: &gpui_kit::ScrollHandle,
     trailing: Option<AnyElement>,
+    column: bool,
     on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
     on_rename: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
     on_close: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
@@ -123,16 +142,21 @@ pub fn tab_strip(
     let mut strip = div()
         .id("tab-strip")
         .flex()
-        .flex_row()
-        .items_center()
         .gap(px(GAP))
-        .min_w_0()
-        .overflow_x_scroll()
+        .map(|strip| match column {
+            true => strip.flex_col().size_full().min_h_0().overflow_y_scroll(),
+            false => strip
+                .flex_row()
+                .items_center()
+                .min_w_0()
+                .overflow_x_scroll(),
+        })
         .track_scroll(scroll);
     for (index, tab) in tabs.into_iter().enumerate() {
         strip = strip.child(plate(
             index,
             tab,
+            column,
             on_select.clone(),
             on_rename.clone(),
             on_close.clone(),
@@ -146,6 +170,7 @@ pub fn tab_strip(
 fn plate(
     index: usize,
     tab: Tab,
+    column: bool,
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
     on_rename: impl Fn(usize, &mut Window, &mut App) + 'static,
     on_close: impl Fn(usize, &mut Window, &mut App) + 'static,
@@ -158,15 +183,20 @@ fn plate(
         .group(group.clone())
         .relative()
         .h(px(PLATE_HEIGHT))
-        // Every plate starts at the full width and gives way at the same
-        // rate, so a crowded band splits evenly between them.
-        .w(px(MAX_WIDTH))
-        .flex_shrink(1.0)
-        .min_w(px(if tab.active {
-            SELECTED_MIN_WIDTH
-        } else {
-            MIN_WIDTH
-        }))
+        .map(|plate| match column {
+            // In a column every plate is the column's width.
+            true => plate.w_full().flex_none(),
+            // Across the band every plate starts at the full width and gives
+            // way at the same rate, so a crowded band splits evenly.
+            false => plate
+                .w(px(MAX_WIDTH))
+                .flex_shrink(1.0)
+                .min_w(px(if tab.active {
+                    SELECTED_MIN_WIDTH
+                } else {
+                    MIN_WIDTH
+                })),
+        })
         .overflow_hidden()
         .pl(px(if tab.icon.is_some() { TILE_INSET } else { 10.0 }))
         .pr(px(if closable { CLOSE_ROOM } else { 8.0 }))

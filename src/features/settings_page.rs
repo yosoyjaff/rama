@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use crate::features::command_line::{self, CommandStatus, InstallCommandLine};
 use crate::recents;
-use crate::settings::{self, Accent, Mode, SavePolicy, Settings};
+use crate::settings::{self, Accent, Mode, SavePolicy, Settings, TabSide};
 use crate::ui::lane_palette::LanePalette;
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::{AccentColor, Theme, wash};
@@ -474,6 +474,23 @@ impl SettingsPage {
                         theme,
                         cx,
                         |settings, value| settings.look.mode = value,
+                    ),
+                    theme,
+                ),
+                self.row(
+                    "Tabs",
+                    "Where the open projects are listed: across the top, or down a side.",
+                    self.choices(
+                        "settings-tabs",
+                        &[
+                            (TabSide::Top, "Top"),
+                            (TabSide::Left, "Left"),
+                            (TabSide::Right, "Right"),
+                        ],
+                        settings.look.tabs,
+                        theme,
+                        cx,
+                        |settings, value| settings.look.tabs = value,
                     ),
                     theme,
                 ),
