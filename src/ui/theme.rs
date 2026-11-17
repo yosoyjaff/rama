@@ -19,6 +19,8 @@ use std::sync::Arc;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{App, Global, Hsla, SharedString, hsla};
 
+use crate::settings::GroupColor;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Appearance {
     Dark,
@@ -190,6 +192,35 @@ fn indicator_tones(accent: Hsla, strong: Hsla, appearance: Appearance) -> [Hsla;
     [lifted, accent, deep]
 }
 
+/// The tab groups' colours: Tailwind v4's 400 step in the dark and its 600
+/// step on white, so each reads as text and as a stripe on its background.
+fn group_tones(appearance: Appearance) -> [Hsla; 9] {
+    match appearance {
+        Appearance::Dark => [
+            oklch(0.707, 0.165, 254.624),
+            oklch(0.704, 0.191, 22.216),
+            oklch(0.852, 0.199, 91.936),
+            oklch(0.792, 0.209, 151.711),
+            oklch(0.718, 0.202, 349.761),
+            oklch(0.714, 0.203, 305.504),
+            oklch(0.789, 0.154, 211.53),
+            oklch(0.75, 0.183, 55.934),
+            neutral(0.708),
+        ],
+        Appearance::Light => [
+            oklch(0.546, 0.245, 262.881),
+            oklch(0.577, 0.245, 27.325),
+            oklch(0.681, 0.162, 75.834),
+            oklch(0.627, 0.194, 149.214),
+            oklch(0.592, 0.249, 0.584),
+            oklch(0.558, 0.288, 302.321),
+            oklch(0.609, 0.126, 221.723),
+            oklch(0.646, 0.222, 41.116),
+            neutral(0.556),
+        ],
+    }
+}
+
 /// Every role, resolved for one appearance and accent.
 #[derive(Debug, Clone)]
 pub struct Theme {
@@ -243,6 +274,8 @@ pub struct Theme {
     pub diff_del: Hsla,
     /// Behind the band between hunks.
     pub diff_hunk_bg: Hsla,
+    /// The tab groups' colours, in [`GroupColor::ALL`] order.
+    pub tab_groups: [Hsla; 9],
 
     pub font_sans: SharedString,
     pub font_mono: SharedString,
@@ -373,6 +406,7 @@ impl Theme {
             diff_add: status.success,
             diff_del: status.danger,
             diff_hunk_bg: status.hunk,
+            tab_groups: group_tones(appearance),
             font_sans: super::fonts::SANS.into(),
             font_mono: super::fonts::MONO.into(),
         };
@@ -437,6 +471,15 @@ impl Theme {
                 },
             ),
         }
+    }
+
+    /// A tab group's colour.
+    pub fn tab_group(&self, color: GroupColor) -> Hsla {
+        let index = GroupColor::ALL
+            .iter()
+            .position(|&c| c == color)
+            .unwrap_or_default();
+        self.tab_groups[index]
     }
 
     /// The theme for the appearance the window is in now.

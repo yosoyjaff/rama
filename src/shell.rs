@@ -21,8 +21,7 @@ use gpui_kit::*;
 /// The tabs' sidebar, when they run down a side instead of across the band.
 const TAB_COLUMN_WIDTH: f32 = 200.;
 const TAB_COLUMN_PAD: f32 = 8.;
-/// The column's heading, and the + at its end.
-const SECTION_HEIGHT: f32 = 28.;
+/// The + on the column's Projects heading.
 const SECTION_BUTTON: f32 = 20.;
 
 pub struct Shell {
@@ -118,20 +117,22 @@ impl Shell {
     /// it as the tabs are to each other.
     fn render_tabs(&mut self, column: bool, cx: &mut Context<Self>) -> AnyElement {
         // Across the band the button follows the last tab; a column has it
-        // in its heading instead.
-        let open_project = (!column).then(|| {
-            self.render_band_button(
-                "shell-open-project",
-                crate::ui::icons::PLUS,
-                "Open another project",
-                false,
-                true,
-                |workspace, _, cx| workspace.pick_project(cx),
-            )
-            .into_any_element()
-        });
+        // on its Projects heading instead.
+        let open_project = match column {
+            true => self.render_open_project_button(cx),
+            false => self
+                .render_band_button(
+                    "shell-open-project",
+                    crate::ui::icons::PLUS,
+                    "Open another project",
+                    false,
+                    true,
+                    |workspace, _, cx| workspace.pick_project(cx),
+                )
+                .into_any_element(),
+        };
         self.workspace.update(cx, |workspace, cx| {
-            workspace.render_tab_strip(open_project, column, cx)
+            workspace.render_tab_strip(Some(open_project), column, cx)
         })
     }
 
@@ -192,25 +193,7 @@ impl Shell {
                 TabSide::Right => column.border_l_1().rounded_br(px(corner)),
                 _ => column.border_r_1().rounded_bl(px(corner)),
             })
-            // A section label, with the button that opens another project
-            // at its end.
-            .child(
-                div()
-                    .h(px(SECTION_HEIGHT))
-                    // The label lines up with the rows' glyphs; the + sits
-                    // where their close buttons do, 4px from the edge.
-                    .pl(px(8.))
-                    .pr(px(4.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .text_size(crate::ui::typography::ui_rems(12.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_muted)
-                    .child(div().flex_1().child("Projects"))
-                    .child(self.render_open_project_button(cx)),
-            )
+            // Its section labels — Groups, Projects — scroll with the rows.
             .child(strip)
             .into_any_element()
     }

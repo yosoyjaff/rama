@@ -16,9 +16,11 @@
 //! owner brings the active one into view with [`reveal`], on the
 //! [`gpui_kit::ScrollHandle`] it passes in.
 
+use std::rc::Rc;
+
 use gpui_kit::{
-    AnyElement, App, ContentMask, ElementId, IntoElement, SharedString, TextAlign, TextRun, Window,
-    canvas, div, prelude::*, px,
+    AnyElement, App, ContentMask, ElementId, FontWeight, Hsla, IntoElement, MouseButton, Pixels,
+    Point, SharedString, TextAlign, TextRun, Window, canvas, div, prelude::*, px,
 };
 
 use crate::ui::motion;
@@ -46,6 +48,13 @@ const CLOSE_SIZE: f32 = 20.0;
 const CLOSE_ROOM: f32 = 26.0;
 /// How far from its end an overflowing title starts to fade.
 const FADE: f32 = 40.0;
+/// Between a group plate's dot, name and chevron.
+const GROUP_GAP: f32 = 6.0;
+/// A column's section label, and the space above one after the first.
+pub const SECTION_HEIGHT: f32 = 28.0;
+const SECTION_GAP: f32 = 8.0;
+/// Where a group's tabs start down a column, under its name.
+const NESTED_INDENT: f32 = 16.0;
 
 /// Scroll the strip just far enough to show plate `index`, and no further.
 ///
@@ -121,22 +130,66 @@ pub struct Tab {
     pub closable: bool,
     /// A field editing the title, drawn in its place.
     pub editor: Option<AnyElement>,
+    /// Listed under a group's heading, down a column: set in from the
+    /// loose tabs.
+    pub nested: bool,
 }
 
-/// Draw the strip. `on_select`, `on_rename` (a double click) and `on_close`
-/// receive the tab's index; `scroll` is the strip's own offset, which
-/// [`reveal`] moves just far enough to show a plate. `trailing` follows the
-/// last plate, as close to it as the plates are to each other. `column`
-/// stacks the plates down a sidebar, each as wide as it, instead of across
-/// the band.
+/// A tab group. Down a column it is a heading over its tabs that a click
+/// folds; across the band it is one plate standing for all of them, which
+/// the owner opens as a dropdown.
+pub struct GroupLabel {
+    pub id: ElementId,
+    pub name: SharedString,
+    pub color: Hsla,
+    /// Folded, down a column.
+    pub collapsed: bool,
+    /// The tab on screen is one of the group's.
+    pub active: bool,
+    /// That tab's title, shown after the group's name across the band.
+    pub current: Option<SharedString>,
+    /// A field editing the name, drawn in its place.
+    pub editor: Option<AnyElement>,
+}
+
+/// A column's section label — Groups, Projects — with its button.
+pub struct Section {
+    pub label: SharedString,
+    pub action: Option<AnyElement>,
+}
+
+/// One thing in the strip.
+pub enum StripItem {
+    Tab(Tab),
+    Group(GroupLabel),
+    Section(Section),
+}
+
+pub type Handler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
+
+/// What the strip reports, each with the item's position in the strip. A
+/// group's `select` is its click; it has no `rename` or `close`.
+#[derive(Clone)]
+pub struct StripEvents {
+    pub select: Handler,
+    /// A double click.
+    pub rename: Handler,
+    pub close: Handler,
+    /// A right click, or a group's options button, with where it landed in
+    /// the window.
+    pub menu: Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App)>,
+}
+
+/// Draw the strip. `scroll` is the strip's own offset, which [`reveal`]
+/// moves just far enough to show an item. `trailing` follows the last plate,
+/// as close to it as the plates are to each other. `column` stacks the plates
+/// down a sidebar, each as wide as it, instead of across the band.
 pub fn tab_strip(
-    tabs: Vec<Tab>,
+    items: Vec<StripItem>,
     scroll: &gpui_kit::ScrollHandle,
     trailing: Option<AnyElement>,
     column: bool,
-    on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
-    on_rename: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
-    on_close: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
+    events: StripEvents,
 ) -> AnyElement {
     let mut strip = div()
         .id("tab-strip")
@@ -156,29 +209,295 @@ pub fn tab_strip(
                 .overflow_x_scroll(),
         })
         .track_scroll(scroll);
-    for (index, tab) in tabs.into_iter().enumerate() {
-        strip = strip.child(plate(
-            index,
-            tab,
-            column,
-            on_select.clone(),
-            on_rename.clone(),
-            on_close.clone(),
-        ));
+    for (index, item) in items.into_iter().enumerate() {
+        strip = strip.child(match item {
+            StripItem::Tab(tab) => plate(index, tab, column, events.clone()),
+            StripItem::Group(label) if column => group_heading(index, label, events.clone()),
+            StripItem::Group(label) => group_plate(index, label, events.clone()),
+            StripItem::Section(section) => section_label(index, section),
+        });
     }
     strip
         .children(trailing.map(|trailing| div().flex_none().child(trailing)))
         .into_any_element()
 }
 
-fn plate(
-    index: usize,
-    tab: Tab,
-    column: bool,
-    on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
-    on_rename: impl Fn(usize, &mut Window, &mut App) + 'static,
-    on_close: impl Fn(usize, &mut Window, &mut App) + 'static,
-) -> AnyElement {
+/// A column's section label. One after the first sits a gap below what is
+/// above it.
+fn section_label(index: usize, section: Section) -> AnyElement {
+    div()
+        .h(px(SECTION_HEIGHT))
+        .when(index > 0, |label| label.mt(px(SECTION_GAP)))
+        .flex_none()
+        // The label lines up with the rows' glyphs; its button sits where
+        // their close buttons do, 4px from the edge.
+        .pl(px(8.0))
+        .pr(px(4.0))
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .text_size(ui_rems(12.0))
+        .font_weight(FontWeight::MEDIUM)
+        .child(SectionText(section.label))
+        .children(section.action)
+        .into_any_element()
+}
+
+#[derive(IntoElement)]
+struct SectionText(SharedString);
+
+impl RenderOnce for SectionText {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        div()
+            .flex_1()
+            .text_color(Theme::of(cx).text_muted)
+            .child(self.0)
+    }
+}
+
+/// A group down a column: a chevron and its name. Folded, the chevron gives
+/// way to the group's colour until the pointer comes over it; an options
+/// button shows on hover.
+fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyElement {
+    let StripEvents { select, menu, .. } = events;
+    let options_menu = menu.clone();
+    let key = SharedString::from(format!("tab-group-heading-{index}"));
+    let collapsed = label.collapsed;
+    let chevron = HeadingChevron {
+        collapsed,
+        key: key.clone(),
+    };
+    let mark = div()
+        .size(px(16.0))
+        .flex_none()
+        .relative()
+        .flex()
+        .items_center()
+        .justify_center()
+        .when(collapsed, |mark| {
+            mark.child(
+                div()
+                    .size(px(8.0))
+                    .rounded_full()
+                    .bg(label.color)
+                    .group_hover(key.clone(), |style| style.invisible()),
+            )
+        })
+        .child(chevron);
+    let name = match label.editor {
+        Some(editor) => div().flex_1().min_w_0().child(editor),
+        None => div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .group_hover(key.clone(), |style| style.pr(px(CLOSE_ROOM)))
+            .child(label.name),
+    };
+    div()
+        .id(label.id)
+        .group(key.clone())
+        .relative()
+        .w_full()
+        .h(px(ROW_HEIGHT))
+        .flex_none()
+        .pl(px(6.0))
+        .pr(px(8.0))
+        .rounded(px(8.0))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(GLYPH_GAP))
+        .cursor_pointer()
+        .text_size(ui_rems(13.0))
+        .font_weight(FontWeight::MEDIUM)
+        .opacity(0.65)
+        .when(!collapsed, |heading| heading.bg(wash(0.05)))
+        .hover(|style| style.bg(wash(0.08)).opacity(1.0))
+        .child(mark)
+        .child(name)
+        .child(
+            div()
+                .id(("tab-group-options", index))
+                .absolute()
+                .right(px(4.0))
+                .top(px((ROW_HEIGHT - CLOSE_SIZE) / 2.0))
+                .size(px(CLOSE_SIZE))
+                .rounded(px(4.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(2.0))
+                .invisible()
+                .group_hover(key, |style| style.visible())
+                .hover(|style| style.bg(wash(0.12)))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(move |event, window, cx| {
+                    cx.stop_propagation();
+                    options_menu(index, event.position(), window, cx);
+                })
+                .children((0..3).map(|_| OptionsDot)),
+        )
+        .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+            cx.stop_propagation();
+            menu(index, event.position, window, cx);
+        })
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            select(index, window, cx);
+        })
+        .into_any_element()
+}
+
+/// A group across the band: one plate for all its tabs, its colour, its
+/// name and, while one of them is on screen, that tab's title. A click opens
+/// the dropdown that lists them.
+fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyElement {
+    let StripEvents { select, menu, .. } = events;
+    let key = SharedString::from(format!("tab-group-plate-{index}"));
+    let lit = label.active;
+    div()
+        .id(label.id)
+        .group(key.clone())
+        .h(px(PLATE_HEIGHT))
+        .flex_none()
+        .max_w(px(MAX_WIDTH))
+        .pl(px(10.0))
+        .pr(px(8.0))
+        .rounded(px(6.0))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(GROUP_GAP))
+        .cursor_pointer()
+        .text_size(ui_rems(13.0))
+        .when(lit, |plate| plate.bg(wash(0.10)))
+        .when(!lit, |plate| {
+            plate
+                .bg(motion::fade_color(&key, wash(0.04), wash(0.07)))
+                .on_hover(motion::on_hover_fade(&key))
+        })
+        .child(
+            div()
+                .flex_none()
+                .size(px(8.0))
+                .rounded_full()
+                .bg(label.color),
+        )
+        .child(GroupPlateText {
+            name: label.name,
+            current: label.current,
+            editor: label.editor,
+            lit,
+            key,
+        })
+        .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+            cx.stop_propagation();
+            menu(index, event.position, window, cx);
+        })
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            select(index, window, cx);
+        })
+        .into_any_element()
+}
+
+/// A group heading's chevron. Folded, it hides until the pointer comes
+/// over the heading, where the group's colour stands for it.
+#[derive(IntoElement)]
+struct HeadingChevron {
+    collapsed: bool,
+    key: SharedString,
+}
+
+impl RenderOnce for HeadingChevron {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = Theme::of(cx);
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(self.collapsed, |slot| {
+                slot.invisible()
+                    .group_hover(self.key, |style| style.visible())
+            })
+            .child(
+                crate::ui::icons::icon(if self.collapsed {
+                    crate::ui::icons::ALT_ARROW_RIGHT
+                } else {
+                    crate::ui::icons::ALT_ARROW_DOWN
+                })
+                .size(px(12.0))
+                .text_color(theme.text),
+            )
+    }
+}
+
+/// One of the three dots on a group heading's options button.
+#[derive(IntoElement)]
+struct OptionsDot;
+
+impl RenderOnce for OptionsDot {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        div()
+            .size(px(3.0))
+            .rounded_full()
+            .bg(Theme::of(cx).text_muted)
+    }
+}
+
+#[derive(IntoElement)]
+struct GroupPlateText {
+    name: SharedString,
+    current: Option<SharedString>,
+    editor: Option<AnyElement>,
+    lit: bool,
+    key: SharedString,
+}
+
+impl RenderOnce for GroupPlateText {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = Theme::of(cx);
+        let (rest, lit) = (theme.text_muted, theme.text);
+        if let Some(editor) = self.editor {
+            return div().w(px(120.0)).child(editor).into_any_element();
+        }
+        div()
+            .min_w_0()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(GROUP_GAP))
+            .text_color(if self.lit { lit } else { rest })
+            .group_hover(self.key, move |style| style.text_color(lit))
+            .child(
+                div()
+                    .flex_none()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(self.name),
+            )
+            .children(
+                self.current
+                    .map(|current| div().min_w_0().truncate().text_color(rest).child(current)),
+            )
+            .child(
+                crate::ui::icons::icon(crate::ui::icons::ALT_ARROW_DOWN)
+                    .flex_none()
+                    .size(px(10.0))
+                    .text_color(rest),
+            )
+            .into_any_element()
+    }
+}
+
+fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElement {
+    let StripEvents {
+        select: on_select,
+        rename: on_rename,
+        close: on_close,
+        menu: on_menu,
+    } = events;
     let group = tab.group.clone();
     let fade = tab.group.clone();
     let closable = tab.closable;
@@ -210,7 +529,11 @@ fn plate(
                 })),
         })
         .overflow_hidden()
-        .pl(px(if column { 8.0 } else { 10.0 }))
+        .pl(px(match (column, tab.nested) {
+            (true, true) => NESTED_INDENT,
+            (true, false) => 8.0,
+            (false, _) => 10.0,
+        }))
         .pr(px(if closable { CLOSE_ROOM } else { 8.0 }))
         .rounded(px(if column { 8.0 } else { 6.0 }))
         .flex()
@@ -225,6 +548,10 @@ fn plate(
             plate
                 .bg(motion::fade_color(&fade, wash(rest), wash(hover)))
                 .on_hover(motion::on_hover_fade(&fade))
+        })
+        .on_mouse_down(MouseButton::Right, move |event, window, cx| {
+            cx.stop_propagation();
+            on_menu(index, event.position, window, cx);
         })
         .on_click(move |event, window, cx| {
             cx.stop_propagation();
