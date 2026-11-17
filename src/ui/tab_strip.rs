@@ -166,6 +166,7 @@ pub enum StripItem {
 }
 
 pub type Handler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
+pub type MenuHandler = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App)>;
 
 /// What the strip reports, each with the item's position in the strip. A
 /// group's `select` is its click; it has no `rename` or `close`.
@@ -177,7 +178,7 @@ pub struct StripEvents {
     pub close: Handler,
     /// A right click, or a group's options button, with where it landed in
     /// the window.
-    pub menu: Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App)>,
+    pub menu: MenuHandler,
 }
 
 /// Draw the strip. `scroll` is the strip's own offset, which [`reveal`]
