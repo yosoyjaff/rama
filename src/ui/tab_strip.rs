@@ -183,8 +183,11 @@ pub type DropHandler = Rc<dyn Fn(&TabDrag, DropAt, &mut Window, &mut App)>;
 pub enum DropAt {
     /// The strip around the plates.
     Strip,
-    /// The plate at this position.
+    /// The group at this position: into it.
     On(usize),
+    /// Beside the tab at this position — after it when `after`, before it
+    /// otherwise — in its group.
+    Beside { tab: usize, after: bool },
     /// Just before the group at this position, outside it: the near half of
     /// its plate or heading, which is the only way between two groups that
     /// touch.
@@ -305,7 +308,7 @@ pub fn tab_strip(
         strip.on_drop(move |drag: &TabDrag, window, cx| around(drag, DropAt::Strip, window, cx));
     for (index, item) in items.into_iter().enumerate() {
         strip = strip.child(match item {
-            StripItem::Tab(tab) => plate(index, tab, column, events.clone()),
+            StripItem::Tab(tab) => plate(index, tab, column, dragging, events.clone()),
             StripItem::Group(label) if column => {
                 group_heading(index, label, dragging, events.clone())
             }
@@ -644,6 +647,41 @@ fn before_group(index: usize, column: bool, drop: DropHandler) -> impl IntoEleme
         .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::Before(index), window, cx))
 }
 
+/// One half of the tab at strip position `index` while a tab is dragged:
+/// the far half (`after`) or the near one, across the band left and right,
+/// down a `column` top and bottom. Dropped there, the tab lands on that side.
+/// The half under the pointer shows a bar on its outer edge. It holds no
+/// layout, so the bar moves nothing; it blocks the plate under it, but not
+/// the wheel.
+fn beside_tab(index: usize, after: bool, column: bool, drop: DropHandler) -> impl IntoElement {
+    let half = gpui_kit::relative(0.5);
+    let zone = div().absolute();
+    let zone = match (column, after) {
+        (false, false) => zone.top_0().bottom_0().left_0().w(half),
+        (false, true) => zone.top_0().bottom_0().right_0().w(half),
+        (true, false) => zone.left_0().right_0().top_0().h(half),
+        (true, true) => zone.left_0().right_0().bottom_0().h(half),
+    };
+    let id = match after {
+        true => ("tab-drop-after", index),
+        false => ("tab-drop-before", index),
+    };
+    zone.id(id)
+        .block_mouse_except_scroll()
+        .drag_over::<TabDrag>(move |style, _, _, cx| {
+            let style = match (column, after) {
+                (false, false) => style.border_l(px(DROP_MARK)),
+                (false, true) => style.border_r(px(DROP_MARK)),
+                (true, false) => style.border_t(px(DROP_MARK)),
+                (true, true) => style.border_b(px(DROP_MARK)),
+            };
+            style.border_color(Theme::of(cx).accent)
+        })
+        .on_drop(move |drag: &TabDrag, window, cx| {
+            drop(drag, DropAt::Beside { tab: index, after }, window, cx)
+        })
+}
+
 /// A group heading's chevron. Folded, it hides until the pointer comes
 /// over the heading, where the group's colour stands for it.
 #[derive(IntoElement)]
@@ -771,7 +809,7 @@ impl RenderOnce for GroupPlateText {
     }
 }
 
-fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElement {
+fn plate(index: usize, tab: Tab, column: bool, dragging: bool, events: StripEvents) -> AnyElement {
     let StripEvents {
         select: on_select,
         rename: on_rename,
@@ -852,19 +890,13 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
                 drag.chip(cx)
             })
         })
-        // A tab dropped here takes this one's place and group. A bar marks
-        // the side it lands on: after when it comes from the left.
-        .drag_over::<TabDrag>(move |style, drag, _, cx| {
-            let accent = Theme::of(cx).accent;
-            match drag.from {
-                DragFrom::Strip(from) if from == index => style,
-                DragFrom::Strip(from) if from < index => {
-                    style.border_r(px(DROP_MARK)).border_color(accent)
-                }
-                _ => style.border_l(px(DROP_MARK)).border_color(accent),
-            }
+        // A tab dropped here lands beside this one, on the side under the
+        // pointer, and takes its group.
+        .when(dragging, |plate| {
+            plate
+                .child(beside_tab(index, false, column, on_drop.clone()))
+                .child(beside_tab(index, true, column, on_drop.clone()))
         })
-        .on_drop(move |drag: &TabDrag, window, cx| on_drop(drag, DropAt::On(index), window, cx))
         .children(tab.icon.map(|path| TabGlyph { path }))
         .child(
             div()
