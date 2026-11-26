@@ -55,6 +55,8 @@ const FADE: f32 = 40.0;
 const GROUP_GAP: f32 = 6.0;
 /// A group's wash while a dragged tab is over it.
 const DROP_WASH: f32 = 0.16;
+/// The bar on the side of a tab where a dragged one would land.
+const DROP_MARK: f32 = 2.0;
 /// How much faster a group plate's tab title shrinks than its name.
 const GROUP_TITLE_SHRINK: f32 = 8.0;
 /// A column's section label, and the space above one after the first.
@@ -798,8 +800,18 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
                 drag.chip(cx)
             })
         })
-        // A tab dropped here goes where this one is: into its group, or out
-        // of any.
+        // A tab dropped here takes this one's place and group. A bar marks
+        // the side it lands on: after when it comes from the left.
+        .drag_over::<TabDrag>(move |style, drag, _, cx| {
+            let accent = Theme::of(cx).accent;
+            match drag.from {
+                DragFrom::Strip(from) if from == index => style,
+                DragFrom::Strip(from) if from < index => {
+                    style.border_r(px(DROP_MARK)).border_color(accent)
+                }
+                _ => style.border_l(px(DROP_MARK)).border_color(accent),
+            }
+        })
         .on_drop(move |drag: &TabDrag, window, cx| on_drop(drag, Some(index), window, cx))
         .children(tab.icon.map(|path| TabGlyph { path }))
         .child(
