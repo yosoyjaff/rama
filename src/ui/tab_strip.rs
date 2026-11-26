@@ -57,6 +57,9 @@ const GROUP_GAP: f32 = 6.0;
 const DROP_WASH: f32 = 0.16;
 /// The bar on the side of a tab where a dragged one would land.
 const DROP_MARK: f32 = 2.0;
+/// How far a drop zone reaches past its plate's edge: to put the bar in the
+/// middle of the gap between two plates.
+const MARK_OUTSET: f32 = (GAP + DROP_MARK) / 2.0;
 /// How much faster a group plate's tab title shrinks than its name.
 const GROUP_TITLE_SHRINK: f32 = 8.0;
 /// A column's section label, and the space above one after the first.
@@ -622,7 +625,8 @@ fn before_group(index: usize, drop: DropHandler) -> impl IntoElement {
         .absolute()
         .top_0()
         .bottom_0()
-        .left_0()
+        // In the gap, where the tab before it draws the same bar.
+        .left(px(-MARK_OUTSET))
         .w(gpui_kit::relative(0.5))
         .id(("tab-group-before", index))
         .block_mouse_except_scroll()
@@ -642,12 +646,16 @@ fn before_group(index: usize, drop: DropHandler) -> impl IntoElement {
 /// the wheel.
 fn beside_tab(index: usize, after: bool, column: bool, drop: DropHandler) -> impl IntoElement {
     let half = gpui_kit::relative(0.5);
+    // Out past the edge, so the bar sits in the middle of the gap: the far
+    // half of one tab and the near half of the next mean the same place,
+    // and draw it in the same place.
+    let out = px(-MARK_OUTSET);
     let zone = div().absolute();
     let zone = match (column, after) {
-        (false, false) => zone.top_0().bottom_0().left_0().w(half),
-        (false, true) => zone.top_0().bottom_0().right_0().w(half),
-        (true, false) => zone.left_0().right_0().top_0().h(half),
-        (true, true) => zone.left_0().right_0().bottom_0().h(half),
+        (false, false) => zone.top_0().bottom_0().left(out).w(half),
+        (false, true) => zone.top_0().bottom_0().right(out).w(half),
+        (true, false) => zone.left_0().right_0().top(out).h(half),
+        (true, true) => zone.left_0().right_0().bottom(out).h(half),
     };
     let id = match after {
         true => ("tab-drop-after", index),
@@ -838,7 +846,6 @@ fn plate(index: usize, tab: Tab, column: bool, dragging: bool, events: StripEven
                     MIN_WIDTH
                 })),
         })
-        .overflow_hidden()
         .pl(px(match (column, tab.nested) {
             (true, true) => NESTED_INDENT,
             (true, false) => 8.0,
@@ -889,6 +896,9 @@ fn plate(index: usize, tab: Tab, column: bool, dragging: bool, events: StripEven
             div()
                 .min_w_0()
                 .flex_1()
+                // The plate does not clip — a drop bar hangs past its edge —
+                // so its title does.
+                .overflow_hidden()
                 .h(px(TITLE_HEIGHT))
                 .flex()
                 .items_center()
