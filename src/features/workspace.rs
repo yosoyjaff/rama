@@ -1064,9 +1064,31 @@ impl Workspace {
         };
         let events = StripEvents {
             select,
-            rename: handler(|workspace, entry, window, cx| {
-                workspace.start_rename(entry, window, cx)
-            }),
+            rename: {
+                let (handle, entries) = (handle.clone(), entries.clone());
+                Rc::new(move |position, window, cx: &mut App| {
+                    let Some(&entry) = entries.get(position) else {
+                        return;
+                    };
+                    handle
+                        .update(cx, |workspace, cx| {
+                            let target = match entry {
+                                // Across the band a group's plate shows its
+                                // tab on screen: that is what it renames.
+                                Target::Group(id)
+                                    if !column
+                                        && workspace.group_of(workspace.active) == Some(id) =>
+                                {
+                                    Target::Tab(workspace.active)
+                                }
+                                other => other,
+                            };
+                            workspace.close_menu(cx);
+                            workspace.start_rename(target, window, cx);
+                        })
+                        .ok();
+                })
+            },
             close: handler(|workspace, entry, window, cx| {
                 if let Target::Tab(index) = entry {
                     workspace.close(index, window, cx);

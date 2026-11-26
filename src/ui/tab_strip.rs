@@ -265,7 +265,12 @@ impl RenderOnce for SectionText {
 /// way to the group's colour until the pointer comes over it; an options
 /// button shows on hover.
 fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyElement {
-    let StripEvents { select, menu, .. } = events;
+    let StripEvents {
+        select,
+        rename,
+        menu,
+        ..
+    } = events;
     let options_menu = menu.clone();
     let key = SharedString::from(format!("tab-group-heading-{index}"));
     let collapsed = label.collapsed;
@@ -347,9 +352,14 @@ fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyEle
             cx.stop_propagation();
             menu(index, event.position, window, cx);
         })
-        .on_click(move |_, window, cx| {
+        .on_click(move |event, window, cx| {
             cx.stop_propagation();
+            // Each click of a double one folds or opens the group: the second
+            // undoes the first, and the name is edited as a tab's would be.
             select(index, window, cx);
+            if event.click_count() == 2 {
+                rename(index, window, cx);
+            }
         })
         .into_any_element()
 }
@@ -358,7 +368,12 @@ fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyEle
 /// name and, while one of them is on screen, that tab's title. A click opens
 /// the dropdown that lists them.
 fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyElement {
-    let StripEvents { select, menu, .. } = events;
+    let StripEvents {
+        select,
+        rename,
+        menu,
+        ..
+    } = events;
     let key = SharedString::from(format!("tab-group-plate-{index}"));
     let lit = label.active;
     div()
@@ -401,9 +416,15 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
             cx.stop_propagation();
             menu(index, event.position, window, cx);
         })
-        .on_click(move |_, window, cx| {
+        .on_click(move |event, window, cx| {
             cx.stop_propagation();
-            select(index, window, cx);
+            // The first click of a double one opened the dropdown; the second
+            // edits what the plate shows, as a tab's double click does.
+            if event.click_count() == 2 {
+                rename(index, window, cx);
+            } else {
+                select(index, window, cx);
+            }
         })
         .into_any_element()
 }
