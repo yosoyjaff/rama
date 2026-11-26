@@ -333,7 +333,10 @@ pub fn tab_strip(
                 .flex_row()
                 .items_center()
                 .min_w_0()
-                .overflow_x_scroll(),
+                .overflow_x_scroll()
+                // Out to the band's end while a tab is dragged, for the
+                // end of the strip to take it.
+                .when(dragging, |strip| strip.flex_1()),
         })
         .track_scroll(scroll);
     // Around the plates, a dropped tab leaves its group.
@@ -350,7 +353,18 @@ pub fn tab_strip(
             StripItem::Section(section) => section_label(index, section),
         });
     }
-    let strip = strip.children(trailing.map(|trailing| div().flex_none().child(trailing)));
+    // Across the band, while a tab is dragged, the trailing button's slot
+    // runs to the band's end: dropped anywhere there, the tab goes last, and
+    // a bar between the last plate and the button says so.
+    let end = !column && dragging;
+    let strip = strip.children(trailing.map(|trailing| {
+        div()
+            .flex_none()
+            .relative()
+            .when(end, |slot| slot.flex_1())
+            .child(trailing)
+            .when(end, |slot| slot.child(strip_end(drop.clone())))
+    }));
     if column {
         // A column already runs the sidebar's length.
         return strip.into_any_element();
@@ -367,6 +381,27 @@ pub fn tab_strip(
         })
         .child(strip)
         .into_any_element()
+}
+
+/// The end of the strip across the band while a tab is dragged: the
+/// trailing button and the free width after it. Dropped there, a tab goes
+/// last; the bar sits in the gap before the button, where the last plate's
+/// own far half draws it too.
+fn strip_end(drop: DropHandler) -> impl IntoElement {
+    div()
+        .id("tab-strip-end")
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_0()
+        .left(px(-MARK_OUTSET))
+        .block_mouse_except_scroll()
+        .drag_over::<TabDrag>(|style, _, _, cx| {
+            style
+                .border_l(px(DROP_MARK))
+                .border_color(Theme::of(cx).accent)
+        })
+        .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::Strip, window, cx))
 }
 
 /// A column's section label. One after the first sits a gap below what is
