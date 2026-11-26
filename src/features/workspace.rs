@@ -19,8 +19,8 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable, Hsla,
-    IntoElement, Pixels, Point, Render, Rgba, SharedString, Subscription, Window, div, prelude::*,
-    px,
+    IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Render, Rgba, SharedString,
+    Subscription, Window, div, prelude::*, px,
 };
 
 use super::history::pane::HistoryPane;
@@ -528,6 +528,16 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Rename tab `index` from its menu. A grouped tab is brought on screen
+    /// first: across the band it has no plate of its own, and is edited in
+    /// its group's, which shows the tab on screen.
+    fn rename_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.group_of(index).is_some() && index != self.active {
+            self.activate(index, window, cx);
+        }
+        self.start_rename(Target::Tab(index), window, cx);
+    }
+
     /// End the edit, keeping the typed name when `save`. A blank name gives
     /// the tab its folder's name back. `refocus` hands the keyboard back to
     /// the window when the edit ended from the keyboard.
@@ -945,9 +955,17 @@ impl Workspace {
                     })
                 }
                 Target::Group(id) => {
-                    let editor = editing(entry).map(|input| self.render_rename(&input, cx));
                     let group = self.group(id).cloned().unwrap_or_default();
                     let on_screen = self.group_of(active) == Some(id);
+                    // Across the band a group's tabs have no plate of their
+                    // own: the one on screen is renamed in its group's.
+                    let editor = editing(entry)
+                        .or_else(|| {
+                            (!column && on_screen)
+                                .then(|| editing(Target::Tab(active)))
+                                .flatten()
+                        })
+                        .map(|input| self.render_rename(&input, cx));
                     StripItem::Group(GroupLabel {
                         id: ElementId::Name(format!("workspace-group-{id}").into()),
                         name: group.name.into(),
@@ -1103,6 +1121,16 @@ impl Workspace {
         match target {
             Target::Tab(index) => {
                 let current = self.group_of(index);
+                card = card
+                    .child(
+                        row("tab-menu-rename".into(), "Rename tab".into(), false).on_click(
+                            cx.listener(move |workspace, _, window, cx| {
+                                workspace.close_menu(cx);
+                                workspace.rename_tab(index, window, cx);
+                            }),
+                        ),
+                    )
+                    .child(popover::menu_separator());
                 card = card.child(
                     row(
                         "tab-menu-new-group".into(),
@@ -1188,6 +1216,21 @@ impl Workspace {
                                         .text_color(theme.text_muted),
                                 )
                                 .child(div().flex_1().min_w_0().truncate().child(surface.title()))
+                                // The tab's own menu, in place of the group's.
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(
+                                        move |workspace, event: &MouseDownEvent, window, cx| {
+                                            cx.stop_propagation();
+                                            workspace.open_menu(
+                                                Target::Tab(index),
+                                                event.position,
+                                                window,
+                                                cx,
+                                            );
+                                        },
+                                    ),
+                                )
                                 .on_click(cx.listener(move |workspace, _, window, cx| {
                                     workspace.close_menu(cx);
                                     workspace.activate(index, window, cx);
@@ -1423,6 +1466,30 @@ mod tests {
                 rename(workspace, "   ", true, window, cx);
                 assert_eq!(titles(workspace), vec!["Home", "one"]);
                 assert!(settings::current(cx).tabs.names.is_empty());
+            })
+            .expect("window update");
+    }
+
+    #[gpui_kit::test]
+    fn renaming_a_grouped_tab_brings_it_on_screen_first(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace.open_repository("/repos/one".into(), window, cx);
+                workspace.open_repository("/repos/two".into(), window, cx);
+                workspace.new_group(1, window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                assert_eq!(workspace.active, 2);
+
+                workspace.rename_tab(1, window, cx);
+                assert_eq!(
+                    workspace.active, 1,
+                    "its group's plate shows the tab on screen"
+                );
+                assert_eq!(
+                    workspace.renaming.as_ref().map(|renaming| renaming.target),
+                    Some(Target::Tab(1))
+                );
             })
             .expect("window update");
     }
