@@ -54,11 +54,14 @@ pub fn init(path: &Path) -> Result<PathBuf> {
 /// The folder `git clone` would create for this URL: the last path segment,
 /// without `.git`.
 fn clone_directory_name(url: &str) -> String {
-    let trimmed = url.trim().trim_end_matches('/');
+    // On Windows git also takes `\` as a separator: a local path there is
+    // `C:\repos\repo`.
+    let separator = |c: char| c == '/' || (cfg!(windows) && c == '\\');
+    let trimmed = url.trim().trim_end_matches(separator);
     // `git@host:owner/repo.git` — the segment after the colon, then the last
     // path element of it.
     let tail = trimmed
-        .rsplit(['/', ':'])
+        .rsplit(|c| separator(c) || c == ':')
         .next()
         .unwrap_or_default()
         .trim_end_matches(".git");
@@ -78,6 +81,10 @@ mod tests {
         assert_eq!(clone_directory_name("git@host:owner/repo.git"), "repo");
         assert_eq!(clone_directory_name("/srv/git/repo.git"), "repo");
         assert_eq!(clone_directory_name(""), "");
+        if cfg!(windows) {
+            assert_eq!(clone_directory_name(r"C:\repos\repo"), "repo");
+            assert_eq!(clone_directory_name(r"C:\repos\repo.git\"), "repo");
+        }
     }
 
     #[test]
