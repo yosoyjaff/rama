@@ -184,6 +184,8 @@ const MENU_PADDING: f32 = 4.0;
 const WINDOW_MARGIN: f32 = 8.0;
 /// A colour choice in a group's menu.
 const SWATCH: f32 = 16.0;
+/// How strong an empty group's colour is in the strip.
+const EMPTY_GROUP_ALPHA: f32 = 0.35;
 /// The new-group button on the Groups heading.
 const NEW_GROUP_BUTTON: f32 = 20.0;
 /// Between a group's plate and its dropdown.
@@ -1234,7 +1236,11 @@ impl Workspace {
                     StripItem::Group(GroupLabel {
                         id: ElementId::Name(format!("workspace-group-{id}").into()),
                         name: group.name.into(),
-                        color: theme.tab_group(group.color),
+                        // A group with no tabs reads as idle: its colour dimmed.
+                        color: match self.member_indices(id).next() {
+                            Some(_) => theme.tab_group(group.color),
+                            None => theme.tab_group(group.color).opacity(EMPTY_GROUP_ALPHA),
+                        },
                         collapsed: group.collapsed,
                         active: on_screen,
                         current: on_screen.then(|| self.tabs[active].title()),
