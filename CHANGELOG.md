@@ -4,6 +4,17 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.9.0] - 2026-11-26
+
+### Added
+- A tab whose name is too long for it shows the whole name in a tooltip.
+- A group's colour can be any colour: the palette at the end of its colours
+  opens a colour picker.
+
+### Changed
+- A group's menu offers eight colours in one row; Grey is no longer offered,
+  and groups that have it keep it.
+
 ## [0.8.0] - 2026-11-17
 
 ### Added
