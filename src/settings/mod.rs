@@ -320,67 +320,6 @@ pub struct History {
     pub pull: Pull,
     /// Merge with a merge commit even when a fast-forward would do.
     pub merge_commit: bool,
-    /// The clock commit dates are read on.
-    pub dates: DateZone,
-    /// How long a git command may run before it is stopped.
-    pub timeout: GitTimeout,
-}
-
-/// How long a git command may run before it is stopped.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum GitTimeout {
-    /// As long as it takes.
-    #[default]
-    Off,
-    HalfMinute,
-    Minute,
-    FiveMinutes,
-    FifteenMinutes,
-}
-
-impl GitTimeout {
-    pub const EVERY: [(GitTimeout, &'static str); 5] = [
-        (GitTimeout::Off, "Off"),
-        (GitTimeout::HalfMinute, "30 s"),
-        (GitTimeout::Minute, "1 min"),
-        (GitTimeout::FiveMinutes, "5 min"),
-        (GitTimeout::FifteenMinutes, "15 min"),
-    ];
-
-    pub fn limit(self) -> Option<std::time::Duration> {
-        let secs = match self {
-            GitTimeout::Off => return None,
-            GitTimeout::HalfMinute => 30,
-            GitTimeout::Minute => 60,
-            GitTimeout::FiveMinutes => 5 * 60,
-            GitTimeout::FifteenMinutes => 15 * 60,
-        };
-        Some(std::time::Duration::from_secs(secs))
-    }
-}
-
-/// The clock commit dates are shown on.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum DateZone {
-    /// This computer's time zone.
-    #[default]
-    Local,
-    Utc,
-}
-
-impl DateZone {
-    /// `date` on this clock, written with chrono's `pattern`.
-    pub fn format(self, date: chrono::DateTime<chrono::FixedOffset>, pattern: &str) -> String {
-        match self {
-            DateZone::Local => date
-                .with_timezone(&chrono::Local)
-                .format(pattern)
-                .to_string(),
-            DateZone::Utc => date.with_timezone(&chrono::Utc).format(pattern).to_string(),
-        }
-    }
 }
 
 impl Default for History {
@@ -393,8 +332,6 @@ impl Default for History {
             panel: Panel::default(),
             pull: Pull::default(),
             merge_commit: true,
-            dates: DateZone::default(),
-            timeout: GitTimeout::default(),
         }
     }
 }
@@ -616,13 +553,6 @@ pub fn read<R>(cx: &App, look: impl FnOnce(&Settings) -> R) -> R {
 /// A copy of the settings, for a view that reads many of them.
 pub fn current(cx: &App) -> Settings {
     read(cx, Settings::clone)
-}
-
-/// Call `changed` with the settings now and after every change to them.
-pub fn watch(cx: &mut App, changed: impl Fn(&Settings) + 'static) {
-    read(cx, &changed);
-    cx.observe_global::<Store>(move |cx| read(cx, &changed))
-        .detach();
 }
 
 /// Change the settings and save the change. False when `change` changed
