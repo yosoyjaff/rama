@@ -19,8 +19,8 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable, Hsla,
-    IntoElement, MouseButton, MouseDownEvent, Pixels, Point, Render, Rgba, SharedString,
-    Subscription, Window, div, prelude::*, px,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point, Render, Rgba,
+    SharedString, Subscription, Window, div, prelude::*, px,
 };
 
 use super::history::pane::HistoryPane;
@@ -102,6 +102,9 @@ pub struct Workspace {
     /// A dropdown row was clicked once: the dropdown closes unless a second
     /// click makes it a double one. Dropped, it stays.
     dropdown_close: Option<gpui_kit::Task<()>>,
+    /// Where Move to's groups were painted, so a press on them is not taken
+    /// for one away from the menu they hang outside of.
+    submenu_bounds: Rc<std::cell::Cell<Option<gpui_kit::Bounds<Pixels>>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -133,6 +136,8 @@ struct TabMenu {
     target: Target,
     /// A group's dropdown across the band, which lists its tabs first.
     listing: bool,
+    /// A tab's Move to has its groups open beside it.
+    move_open: bool,
 }
 
 /// `color` as the opaque `#rrggbb` a custom group colour is saved as.
@@ -144,6 +149,13 @@ fn rgb_of(color: Hsla) -> Rgb {
 
 /// The tab menu's width.
 const MENU_WIDTH: f32 = 220.0;
+/// Move to's list of groups, and the space between it and the menu.
+const SUBMENU_WIDTH: f32 = 200.0;
+const SUBMENU_GAP: f32 = 4.0;
+/// The menu card's padding, which the list's top lines up across.
+const MENU_PADDING: f32 = 4.0;
+/// How close to the window's edge a menu may come.
+const WINDOW_MARGIN: f32 = 8.0;
 /// A colour choice in a group's menu.
 const SWATCH: f32 = 16.0;
 /// The new-group button on the Groups heading.
@@ -195,6 +207,7 @@ impl Workspace {
             menu: Layer::default(),
             color_picker,
             dropdown_close: None,
+            submenu_bounds: Rc::default(),
             _subscriptions: subscriptions,
         };
         // The tabs the last session left open come back — but UNLOADED: only
@@ -906,6 +919,7 @@ impl Workspace {
             at,
             target,
             listing: false,
+            move_open: false,
         });
         cx.notify();
     }
@@ -941,6 +955,7 @@ impl Workspace {
             at,
             target: Target::Group(id),
             listing: true,
+            move_open: false,
         });
         cx.notify();
     }
@@ -961,6 +976,16 @@ impl Workspace {
                 })
                 .ok();
         }));
+    }
+
+    /// Open or fold Move to's groups, while the menu is open.
+    fn set_move_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if let Some(menu) = self.menu.live_mut()
+            && menu.move_open != open
+        {
+            menu.move_open = open;
+            cx.notify();
+        }
     }
 
     /// Whether group `id`'s dropdown is on screen across the band, fading
@@ -1201,37 +1226,59 @@ impl Workspace {
     }
 
     /// The right click's menu on a tab or a group label.
-    fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_menu(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.menu.shown()?;
-        let (at, target, listing) = (menu.at, menu.target, menu.listing);
+        let (at, target, listing, move_open) = (menu.at, menu.target, menu.listing, menu.move_open);
         let closing = self.menu.leaving_since();
         let theme = Theme::of(cx).clone();
-        let row = |id: String, label: String, danger: bool| {
+        let plain_row = |id: String, label: String, danger: bool| {
             let id = ElementId::Name(id.into());
             popover::menu_row(&theme, false, SharedString::from(id.to_string()))
                 .id(id.clone())
                 .when(danger, |row| row.text_color(theme.danger_muted))
                 .child(TruncatedLabel::new(id, label))
         };
-        let mut card = popover::popover_card(&theme)
+        // The pointer over any other row folds Move to's groups away. `row`
+        // already spends the one `on_hover` GPUI allows on its wash.
+        let fold = Rc::new(cx.listener(|workspace, _: &MouseMoveEvent, _, cx| {
+            workspace.set_move_open(false, cx);
+        }));
+        let row = |id: String, label: String, danger: bool| {
+            let fold = fold.clone();
+            plain_row(id, label, danger)
+                .on_mouse_move(move |event, window, cx| fold(event, window, cx))
+        };
+        let submenu_bounds = self.submenu_bounds.clone();
+        // Unclipped: Move to's groups hang past its edge.
+        let mut card = popover::popover_surface(&theme)
             .w(px(MENU_WIDTH))
-            .on_mouse_down_out(cx.listener(|workspace, _, window, cx| {
-                // The picker's own popover lies outside the menu: a press in
-                // it is not a press away from the menu.
-                if workspace.color_picker.read(cx).is_open() {
-                    return;
-                }
-                // A row being edited keeps what was typed, as a tab does.
-                let editing_row = workspace.menu.shown().is_some_and(|menu| menu.listing)
-                    && workspace
-                        .renaming
-                        .as_ref()
-                        .is_some_and(|renaming| matches!(renaming.target, Target::Tab(_)));
-                if editing_row {
-                    workspace.finish_rename(true, false, window, cx);
-                }
-                workspace.close_menu(cx);
-            }));
+            .on_mouse_down_out(cx.listener(
+                move |workspace, event: &MouseDownEvent, window, cx| {
+                    // The picker's own popover lies outside the menu: a press in
+                    // it is not a press away from the menu.
+                    if workspace.color_picker.read(cx).is_open() {
+                        return;
+                    }
+                    // Nor is one in Move to's groups, which hang outside it.
+                    let in_submenu = workspace.menu.shown().is_some_and(|menu| menu.move_open)
+                        && submenu_bounds
+                            .get()
+                            .is_some_and(|bounds| bounds.contains(&event.position));
+                    if in_submenu {
+                        return;
+                    }
+                    // A row being edited keeps what was typed, as a tab does.
+                    let editing_row = workspace.menu.shown().is_some_and(|menu| menu.listing)
+                        && workspace
+                            .renaming
+                            .as_ref()
+                            .is_some_and(|renaming| matches!(renaming.target, Target::Tab(_)));
+                    if editing_row {
+                        workspace.finish_rename(true, false, window, cx);
+                    }
+                    workspace.close_menu(cx);
+                },
+            ));
         match target {
             Target::Tab(index) => {
                 let current = self.group_of(index);
@@ -1256,32 +1303,83 @@ impl Workspace {
                         workspace.new_group(index, window, cx);
                     })),
                 );
-                for group in self.groups.iter().filter(|group| Some(group.id) != current) {
-                    let id = group.id;
-                    let name = match group.name.trim() {
-                        "" => format!("{} group", group.color.label()),
-                        name => name.to_string(),
-                    };
-                    card = card.child(
-                        row(
-                            format!("tab-menu-move-{id}"),
-                            format!("Move to {name}"),
-                            false,
-                        )
+                let others: Vec<&TabGroup> = self
+                    .groups
+                    .iter()
+                    .filter(|group| Some(group.id) != current)
+                    .collect();
+                if !others.is_empty() {
+                    let header = plain_row("tab-menu-move".into(), "Move to".into(), false)
+                        .when(move_open, |header| header.bg(theme.element_hover))
                         .child(
-                            div()
+                            icons::icon(icons::ALT_ARROW_RIGHT)
+                                .size(px(10.0))
                                 .flex_none()
-                                .size(px(8.0))
-                                .rounded_full()
-                                .bg(theme.tab_group(group.color)),
+                                .text_color(theme.text_faint),
                         )
-                        .on_click(cx.listener(
-                            move |workspace, _, _, cx| {
-                                workspace.close_menu(cx);
-                                workspace.move_to_group(index, id, cx);
-                            },
-                        )),
-                    );
+                        .on_mouse_move(cx.listener(|workspace, _: &MouseMoveEvent, _, cx| {
+                            workspace.set_move_open(true, cx);
+                        }))
+                        // A click opens it as well, for when nothing hovers.
+                        .on_click(cx.listener(|workspace, _, _, cx| {
+                            let open = workspace.menu.shown().is_some_and(|menu| menu.move_open);
+                            workspace.set_move_open(!open, cx);
+                        }));
+                    let mut wrap = div().relative().child(header);
+                    if move_open {
+                        let bounds = self.submenu_bounds.clone();
+                        // Over the rows below it. Occluding keeps their mouse
+                        // moves from firing through and folding it away.
+                        let mut side = popover::popover_card(&theme)
+                            .id("tab-menu-move-groups")
+                            .relative()
+                            .occlude()
+                            .w(px(SUBMENU_WIDTH))
+                            .child(
+                                gpui_kit::canvas(
+                                    move |area, _, _| bounds.set(Some(area)),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .inset_0(),
+                            );
+                        for group in others {
+                            let id = group.id;
+                            let name = match group.name.trim() {
+                                "" => format!("{} group", group.color.label()),
+                                name => name.to_string(),
+                            };
+                            side = side.child(
+                                plain_row(format!("tab-menu-move-{id}"), name, false)
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .size(px(8.0))
+                                            .rounded_full()
+                                            .bg(theme.tab_group(group.color)),
+                                    )
+                                    .on_click(cx.listener(move |workspace, _, _, cx| {
+                                        workspace.close_menu(cx);
+                                        workspace.move_to_group(index, id, cx);
+                                    })),
+                            );
+                        }
+                        // To the right, unless the window ends first: then
+                        // to the left.
+                        let viewport = window.viewport_size().width;
+                        let left = at.x.min(viewport - px(MENU_WIDTH + WINDOW_MARGIN));
+                        let fits_right = left + px(MENU_WIDTH + SUBMENU_GAP + SUBMENU_WIDTH)
+                            <= viewport - px(WINDOW_MARGIN);
+                        let hang = div().absolute().top(px(-MENU_PADDING));
+                        let hang = match fits_right {
+                            true => hang.left_full().ml(px(SUBMENU_GAP + MENU_PADDING)),
+                            false => hang
+                                .right(gpui_kit::relative(1.0))
+                                .mr(px(SUBMENU_GAP + MENU_PADDING)),
+                        };
+                        wrap = wrap.child(hang.child(side));
+                    }
+                    card = card.child(wrap);
                 }
                 if current.is_some() {
                     card = card.child(
@@ -1542,7 +1640,7 @@ impl Render for Workspace {
             // home is always there.
             _ => self.welcome.clone().into_any_element(),
         };
-        let menu = self.render_menu(cx);
+        let menu = self.render_menu(window, cx);
         div()
             .track_focus(&self.focus_handle)
             .size_full()
@@ -1683,6 +1781,7 @@ mod tests {
                     at: gpui_kit::point(px(0.0), px(0.0)),
                     target: Target::Group(id),
                     listing: true,
+                    move_open: false,
                 });
                 assert!(workspace.dropdown_open(id));
 
