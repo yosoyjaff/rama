@@ -15,16 +15,19 @@
 
 use std::rc::Rc;
 
+use gpui_kit::component::Icon;
+use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable,
-    IntoElement, Pixels, Point, Render, SharedString, Subscription, Window, div, prelude::*, px,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable, Hsla,
+    IntoElement, Pixels, Point, Render, Rgba, SharedString, Subscription, Window, div, prelude::*,
+    px,
 };
 
 use super::history::pane::HistoryPane;
 use super::settings_page::{SettingsPage, SettingsPageEvent};
 use super::welcome::{Welcome, WelcomeEvent};
 use crate::recents;
-use crate::settings::{self, GroupColor, SavePolicy, TabGroup};
+use crate::settings::{self, GroupColor, Rgb, SavePolicy, TabGroup};
 use crate::ui::icons;
 use crate::ui::popover::{self, Layer};
 use crate::ui::tab_strip::{
@@ -93,6 +96,8 @@ pub struct Workspace {
     groups: Vec<TabGroup>,
     /// A right click's menu on a tab or a group label.
     menu: Layer<TabMenu>,
+    /// The group menu's custom colour, past its named shades.
+    color_picker: Entity<ColorPickerState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -126,6 +131,13 @@ struct TabMenu {
     listing: bool,
 }
 
+/// `color` as the opaque `#rrggbb` a custom group colour is saved as.
+fn rgb_of(color: Hsla) -> Rgb {
+    let Rgba { r, g, b, .. } = color.into();
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
+    Rgb(channel(r) << 16 | channel(g) << 8 | channel(b))
+}
+
 /// The tab menu's width.
 const MENU_WIDTH: f32 = 220.0;
 /// A colour choice in a group's menu.
@@ -138,7 +150,8 @@ const DROPDOWN_GAP: f32 = 4.0;
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let welcome = cx.new(|cx| Welcome::new(window, cx));
-        let subscriptions = vec![cx.subscribe_in(
+        let color_picker = cx.new(|cx| ColorPickerState::new(window, cx));
+        let mut subscriptions = vec![cx.subscribe_in(
             &welcome,
             window,
             |workspace: &mut Self, _, event, window, cx| match event {
@@ -150,6 +163,17 @@ impl Workspace {
                 }
             },
         )];
+        subscriptions.push(cx.subscribe(
+            &color_picker,
+            |workspace: &mut Self, _, event: &ColorPickerEvent, cx| {
+                let ColorPickerEvent::Change(Some(color)) = event else {
+                    return;
+                };
+                if let Some(Target::Group(id)) = workspace.menu.shown().map(|menu| menu.target) {
+                    workspace.set_group_color(id, GroupColor::Custom(rgb_of(*color)), cx);
+                }
+            },
+        ));
         let mut workspace = Self {
             tabs: vec![Surface::Home],
             active: 0,
@@ -161,6 +185,7 @@ impl Workspace {
             renaming: None,
             groups: Vec::new(),
             menu: Layer::default(),
+            color_picker,
             _subscriptions: subscriptions,
         };
         // The tabs the last session left open come back — but UNLOADED: only
@@ -695,10 +720,10 @@ impl Workspace {
     fn create_group(&mut self, window: &mut Window, cx: &mut Context<Self>) -> u64 {
         let id = self.groups.iter().map(|group| group.id).max().unwrap_or(0) + 1;
         // A colour no other group has, while there is one.
-        let color = GroupColor::ALL
+        let color = GroupColor::OFFERED
             .into_iter()
             .find(|&color| !self.groups.iter().any(|group| group.color == color))
-            .unwrap_or(GroupColor::ALL[self.groups.len() % GroupColor::ALL.len()]);
+            .unwrap_or(GroupColor::OFFERED[self.groups.len() % GroupColor::OFFERED.len()]);
         let taken = |name: &str| self.groups.iter().any(|group| group.name == name);
         let name = std::iter::once("New group".to_string())
             .chain((2..).map(|n| format!("New group {n}")))
@@ -796,9 +821,18 @@ impl Workspace {
 
     // ── Menu ────────────────────────────────────────────────────────────────
 
-    fn open_menu(&mut self, target: Target, at: Point<Pixels>, cx: &mut Context<Self>) {
+    fn open_menu(
+        &mut self,
+        target: Target,
+        at: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if matches!(target, Target::Section(_)) {
             return;
+        }
+        if let Target::Group(id) = target {
+            self.show_group_color(id, window, cx);
         }
         self.menu.open(TabMenu {
             at,
@@ -810,7 +844,13 @@ impl Workspace {
 
     /// A group's dropdown, hanging under its plate at strip position
     /// `position`. A second click on the plate closes it.
-    fn toggle_dropdown(&mut self, id: u64, position: usize, cx: &mut Context<Self>) {
+    fn toggle_dropdown(
+        &mut self,
+        id: u64,
+        position: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // The press on the plate has already dismissed an open dropdown (a
         // press outside a menu closes it), and the click lands while it
         // fades: that click is the one closing it, not opening it again.
@@ -828,6 +868,7 @@ impl Workspace {
         };
         let offset = self.tab_scroll.offset();
         let at = gpui_kit::point(plate.left() + offset.x, plate.bottom() + px(DROPDOWN_GAP));
+        self.show_group_color(id, window, cx);
         self.menu.open(TabMenu {
             at,
             target: Target::Group(id),
@@ -838,6 +879,18 @@ impl Workspace {
 
     fn close_menu(&mut self, cx: &mut Context<Self>) {
         self.menu.dismiss(cx, |workspace| &mut workspace.menu);
+    }
+
+    /// Start the colour picker from group `id`'s colour, whichever it is.
+    fn show_group_color(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(color) = self.group(id).map(|group| group.color) else {
+            return;
+        };
+        let tone = Theme::of(cx).tab_group(color);
+        self.color_picker.update(cx, |picker, cx| {
+            picker.set_open(false, cx);
+            picker.set_value(tone, window, cx);
+        });
     }
 
     /// Whether the home screen is what the window shows.
@@ -940,7 +993,7 @@ impl Workspace {
                     .update(cx, |workspace, cx| match entry {
                         Target::Tab(index) => workspace.activate(index, window, cx),
                         Target::Group(id) if column => workspace.toggle_group(id, cx),
-                        Target::Group(id) => workspace.toggle_dropdown(id, position, cx),
+                        Target::Group(id) => workspace.toggle_dropdown(id, position, window, cx),
                         Target::Section(_) => {}
                     })
                     .ok();
@@ -958,10 +1011,12 @@ impl Workspace {
             }),
             menu: {
                 let (handle, entries) = (handle.clone(), entries.clone());
-                Rc::new(move |position, at, _, cx: &mut App| {
+                Rc::new(move |position, at, window, cx: &mut App| {
                     if let Some(&entry) = entries.get(position) {
                         handle
-                            .update(cx, |workspace, cx| workspace.open_menu(entry, at, cx))
+                            .update(cx, |workspace, cx| {
+                                workspace.open_menu(entry, at, window, cx)
+                            })
                             .ok();
                     }
                 })
@@ -1038,7 +1093,13 @@ impl Workspace {
         };
         let mut card = popover::popover_card(&theme)
             .w(px(MENU_WIDTH))
-            .on_mouse_down_out(cx.listener(|workspace, _, _, cx| workspace.close_menu(cx)));
+            .on_mouse_down_out(cx.listener(|workspace, _, _, cx| {
+                // The picker's own popover lies outside the menu: a press in
+                // it is not a press away from the menu.
+                if !workspace.color_picker.read(cx).is_open() {
+                    workspace.close_menu(cx);
+                }
+            }));
         match target {
             Target::Tab(index) => {
                 let current = self.group_of(index);
@@ -1138,11 +1199,11 @@ impl Workspace {
                 let chosen = self.group(id).map(|group| group.color);
                 let mut swatches = div()
                     .flex()
-                    .flex_wrap()
+                    .items_center()
                     .gap(px(6.0))
                     .px(px(8.0))
                     .py(px(6.0));
-                for color in GroupColor::ALL {
+                for color in GroupColor::OFFERED {
                     let tone = theme.tab_group(color);
                     swatches = swatches.child(
                         div()
@@ -1165,6 +1226,31 @@ impl Workspace {
                             })),
                     );
                 }
+                // Last, past a rule and drawn as a palette, so it reads as
+                // "pick another", not as one more colour. A custom colour
+                // tints the palette.
+                let custom = match chosen {
+                    Some(color @ GroupColor::Custom(_)) => Some(theme.tab_group(color)),
+                    _ => None,
+                };
+                let named = GroupColor::OFFERED
+                    .map(|color| theme.tab_group(color))
+                    .to_vec();
+                swatches = swatches
+                    .child(div().w(px(1.0)).h(px(SWATCH)).bg(theme.border))
+                    .child(
+                        ColorPicker::new(&self.color_picker)
+                            .icon(
+                                Icon::default()
+                                    .path(icons::PALLETE_2)
+                                    .size(px(SWATCH))
+                                    .text_color(custom.unwrap_or(theme.text_muted)),
+                            )
+                            .featured_colors(named)
+                            .accessibility_label("Custom color")
+                            .size(px(SWATCH))
+                            .cursor_pointer(),
+                    );
                 card = card
                     .child(
                         row("tab-menu-rename-group".into(), "Rename group".into(), false).on_click(

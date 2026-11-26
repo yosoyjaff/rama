@@ -93,6 +93,7 @@ glyphs! {
     MAGNIFER = "magnifer",
     MINUS = "minus",
     PARAGRAPH = "paragraph",
+    PALLETE_2 = "pallete-2",
     PEN = "pen",
     PEN_NEW_SQUARE = "pen-new-square",
     PENCIL_EDIT_01 = "pencil-edit-01",

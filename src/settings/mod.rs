@@ -397,7 +397,8 @@ pub struct TabGroup {
     pub collapsed: bool,
 }
 
-/// A tab group's colour. The shades are theme roles.
+/// A tab group's colour. The named shades are theme roles; a custom one is
+/// what the user picked, the same in both themes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GroupColor {
@@ -411,9 +412,36 @@ pub enum GroupColor {
     Cyan,
     Orange,
     Grey,
+    Custom(Rgb),
+}
+
+/// An opaque colour, saved as `#rrggbb`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub struct Rgb(pub u32);
+
+impl From<Rgb> for String {
+    fn from(rgb: Rgb) -> Self {
+        format!("#{:06x}", rgb.0)
+    }
+}
+
+impl TryFrom<String> for Rgb {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        let hex = text.strip_prefix('#').unwrap_or(&text);
+        if hex.len() != 6 {
+            return Err(format!("not a #rrggbb colour: {text}"));
+        }
+        u32::from_str_radix(hex, 16)
+            .map(Rgb)
+            .map_err(|_| format!("not a #rrggbb colour: {text}"))
+    }
 }
 
 impl GroupColor {
+    /// The named shades, in the theme's order.
     pub const ALL: [Self; 9] = [
         Self::Blue,
         Self::Red,
@@ -424,6 +452,19 @@ impl GroupColor {
         Self::Cyan,
         Self::Orange,
         Self::Grey,
+    ];
+
+    /// The shades a group's menu offers, in one row with the picker. Grey is
+    /// not among them; a group that has it keeps it.
+    pub const OFFERED: [Self; 8] = [
+        Self::Blue,
+        Self::Red,
+        Self::Yellow,
+        Self::Green,
+        Self::Pink,
+        Self::Purple,
+        Self::Cyan,
+        Self::Orange,
     ];
 
     pub fn label(self) -> &'static str {
@@ -437,6 +478,7 @@ impl GroupColor {
             Self::Purple => "Purple",
             Self::Cyan => "Cyan",
             Self::Orange => "Orange",
+            Self::Custom(_) => "Custom",
         }
     }
 }
@@ -624,5 +666,20 @@ mod tests {
         columns.reset_widths();
         assert_eq!(columns.sha.width, ColumnId::Sha.default_width());
         assert!(!columns.sha.shown);
+    }
+
+    #[test]
+    fn a_custom_group_colour_is_saved_as_hex_and_named_ones_as_before() {
+        let custom = serde_json::to_string(&GroupColor::Custom(Rgb(0x3366ff))).unwrap();
+        assert_eq!(custom, r##"{"custom":"#3366ff"}"##);
+        assert_eq!(
+            serde_json::from_str::<GroupColor>(&custom).unwrap(),
+            GroupColor::Custom(Rgb(0x3366ff))
+        );
+        assert_eq!(
+            serde_json::to_string(&GroupColor::Blue).unwrap(),
+            r#""blue""#
+        );
+        assert!(serde_json::from_str::<GroupColor>(r##"{"custom":"#33f"}"##).is_err());
     }
 }

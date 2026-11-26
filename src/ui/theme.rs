@@ -475,6 +475,9 @@ impl Theme {
 
     /// A tab group's colour.
     pub fn tab_group(&self, color: GroupColor) -> Hsla {
+        if let GroupColor::Custom(rgb) = color {
+            return gpui_kit::rgb(rgb.0).into();
+        }
         let index = GroupColor::ALL
             .iter()
             .position(|&c| c == color)
