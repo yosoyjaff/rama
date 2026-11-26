@@ -1207,7 +1207,14 @@ impl Workspace {
                 })
             },
         };
-        tab_strip(items, &self.tab_scroll, trailing, column, events)
+        tab_strip(
+            items,
+            &self.tab_scroll,
+            trailing,
+            column,
+            cx.has_active_drag(),
+            events,
+        )
     }
 
     /// The button on the Groups heading: a new, empty group.

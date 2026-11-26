@@ -70,6 +70,8 @@ pub struct AppTitleBar {
     content: Option<AnyElement>,
     /// Drop the rule in front of the trailing window buttons.
     no_rule: bool,
+    /// The content takes the band's free width too.
+    content_grows: bool,
 }
 
 impl AppTitleBar {
@@ -102,6 +104,14 @@ impl AppTitleBar {
 
     pub fn content(mut self, content: impl IntoElement) -> Self {
         self.content = Some(content.into_any_element());
+        self
+    }
+
+    /// Let the content take the free width the band otherwise keeps for
+    /// dragging the window: while a tab is dragged, which is no time to move
+    /// the window, and the free width is where a tab is dropped.
+    pub fn content_grows(mut self, grows: bool) -> Self {
+        self.content_grows = grows;
         self
     }
 }
@@ -406,6 +416,7 @@ impl RenderOnce for AppTitleBar {
                 grab_proof(content)
                     .min_w_0()
                     .flex_shrink(1.)
+                    .when(self.content_grows, |slot| slot.flex_1())
                     .when(has_left, |slot| slot.ml(BUTTON_GAP))
             }))
             .child(div().flex_1().min_w(GRAB_ROOM).h_full())

@@ -66,6 +66,8 @@ impl Shell {
         let settings_open = self.workspace.read(cx).settings_active();
         let across = crate::settings::current(cx).look.tabs == TabSide::Top && !settings_open;
         let strip = across.then(|| self.render_tabs(false, cx));
+        // A dragged tab may be dropped anywhere along the band.
+        let dragging = across && cx.has_active_drag();
         let (home_active, settings_active) = self.workspace.update(cx, |workspace, _| {
             (workspace.home_active(), workspace.settings_active())
         });
@@ -75,6 +77,7 @@ impl Shell {
             .items_center()
             .gap(px(4.))
             .min_w_0()
+            .when(dragging, |content| content.flex_1())
             .child(self.render_band_button(
                 "shell-home",
                 crate::ui::icons::HOME_01,
@@ -102,13 +105,21 @@ impl Shell {
                         .flex_none()
                         .bg(crate::ui::theme::Theme::of(cx).border),
                 )
-                .child(div().flex().min_w_0().child(strip))
+                .child(
+                    div()
+                        .flex()
+                        .min_w_0()
+                        .h_full()
+                        .when(dragging, |slot| slot.flex_1())
+                        .child(strip),
+                )
             });
         // With the tabs down a side the band holds only Home and Settings,
         // and a rule before the window buttons would part nothing.
         let side_tabs = crate::settings::current(cx).look.tabs != TabSide::Top;
         AppTitleBar::new()
             .content(content)
+            .content_grows(dragging)
             .when(side_tabs, |bar| bar.without_rule())
     }
 

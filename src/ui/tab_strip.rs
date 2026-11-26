@@ -256,13 +256,17 @@ impl Render for TabDragChip {
 /// moves just far enough to show an item. `trailing` follows the last plate,
 /// as close to it as the plates are to each other. `column` stacks the plates
 /// down a sidebar, each as wide as it, instead of across the band.
+/// `dragging` says a drag is under way: across the band the strip then
+/// stretches over the free width, where a tab dropped leaves its group.
 pub fn tab_strip(
     items: Vec<StripItem>,
     scroll: &gpui_kit::ScrollHandle,
     trailing: Option<AnyElement>,
     column: bool,
+    dragging: bool,
     events: StripEvents,
 ) -> AnyElement {
+    let drop = events.drop.clone();
     let mut strip = div()
         .id("tab-strip")
         .flex()
@@ -282,8 +286,8 @@ pub fn tab_strip(
         })
         .track_scroll(scroll);
     // Around the plates, a dropped tab leaves its group.
-    let drop = events.drop.clone();
-    strip = strip.on_drop(move |drag: &TabDrag, window, cx| drop(drag, None, window, cx));
+    let around = drop.clone();
+    strip = strip.on_drop(move |drag: &TabDrag, window, cx| around(drag, None, window, cx));
     for (index, item) in items.into_iter().enumerate() {
         strip = strip.child(match item {
             StripItem::Tab(tab) => plate(index, tab, column, events.clone()),
@@ -292,8 +296,22 @@ pub fn tab_strip(
             StripItem::Section(section) => section_label(index, section),
         });
     }
-    strip
-        .children(trailing.map(|trailing| div().flex_none().child(trailing)))
+    let strip = strip.children(trailing.map(|trailing| div().flex_none().child(trailing)));
+    if column {
+        // A column already runs the sidebar's length.
+        return strip.into_any_element();
+    }
+    // The same wrapper either way, so the strip keeps its place in the tree.
+    div()
+        .h_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .when(dragging, |zone| {
+            zone.flex_1()
+                .on_drop(move |drag: &TabDrag, window, cx| drop(drag, None, window, cx))
+        })
+        .child(strip)
         .into_any_element()
 }
 
