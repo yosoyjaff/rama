@@ -53,6 +53,8 @@ const CLOSE_ROOM: f32 = 26.0;
 const FADE: f32 = 40.0;
 /// Between a group plate's dot, name and chevron.
 const GROUP_GAP: f32 = 6.0;
+/// A group's wash while a dragged tab is over it.
+const DROP_WASH: f32 = 0.16;
 /// How much faster a group plate's tab title shrinks than its name.
 const GROUP_TITLE_SHRINK: f32 = 8.0;
 /// A column's section label, and the space above one after the first.
@@ -171,6 +173,8 @@ pub enum StripItem {
 }
 
 pub type Handler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
+/// A plate dropped on another: the dragged one's position, then the target's.
+pub type DropHandler = Rc<dyn Fn(usize, usize, &mut Window, &mut App)>;
 pub type MenuHandler = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App)>;
 
 /// What the strip reports, each with the item's position in the strip. A
@@ -184,6 +188,45 @@ pub struct StripEvents {
     /// A right click, or a group's options button, with where it landed in
     /// the window.
     pub menu: MenuHandler,
+    /// A tab dragged onto a group.
+    pub drop: DropHandler,
+}
+
+/// What a tab carries while it is dragged: where it sits in the strip, and
+/// what the chip under the pointer shows.
+pub struct TabDrag {
+    position: usize,
+    title: SharedString,
+    icon: Option<&'static str>,
+}
+
+/// Drawn under the pointer while a tab is dragged: its glyph and title.
+struct TabDragChip {
+    title: SharedString,
+    icon: Option<&'static str>,
+}
+
+impl Render for TabDragChip {
+    fn render(&mut self, _: &mut Window, cx: &mut gpui_kit::Context<Self>) -> impl IntoElement {
+        let theme = Theme::of(cx);
+        div()
+            .h(px(PLATE_HEIGHT))
+            .max_w(px(MAX_WIDTH))
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(GLYPH_GAP))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(theme.surface_raised)
+            .shadow_md()
+            .opacity(0.9)
+            .text_size(ui_rems(13.0))
+            .text_color(theme.text)
+            .children(self.icon.map(|path| TabGlyph { path }))
+            .child(div().min_w_0().truncate().child(self.title.clone()))
+    }
 }
 
 /// Draw the strip. `scroll` is the strip's own offset, which [`reveal`]
@@ -269,6 +312,7 @@ fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyEle
         select,
         rename,
         menu,
+        drop,
         ..
     } = events;
     let options_menu = menu.clone();
@@ -352,6 +396,9 @@ fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyEle
             cx.stop_propagation();
             menu(index, event.position, window, cx);
         })
+        // A tab dragged here joins the group.
+        .drag_over::<TabDrag>(|style, _, _, _| style.bg(wash(DROP_WASH)))
+        .on_drop(move |drag: &TabDrag, window, cx| drop(drag.position, index, window, cx))
         .on_click(move |event, window, cx| {
             cx.stop_propagation();
             // Each click of a double one folds or opens the group: the second
@@ -372,6 +419,7 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
         select,
         rename,
         menu,
+        drop,
         ..
     } = events;
     let key = SharedString::from(format!("tab-group-plate-{index}"));
@@ -416,6 +464,9 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
             cx.stop_propagation();
             menu(index, event.position, window, cx);
         })
+        // A tab dragged here joins the group.
+        .drag_over::<TabDrag>(|style, _, _, _| style.bg(wash(DROP_WASH)))
+        .on_drop(move |drag: &TabDrag, window, cx| drop(drag.position, index, window, cx))
         .on_click(move |event, window, cx| {
             cx.stop_propagation();
             // The first click of a double one opened the dropdown; the second
@@ -628,7 +679,15 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
         rename: on_rename,
         close: on_close,
         menu: on_menu,
+        drop: _,
     } = events;
+    // A project tab can be dragged onto a group; Home cannot, nor a tab
+    // whose name is being edited.
+    let drag = (tab.closable && tab.editor.is_none()).then(|| TabDrag {
+        position: index,
+        title: tab.title.clone(),
+        icon: tab.icon,
+    });
     let group = tab.group.clone();
     let fade = tab.group.clone();
     let closable = tab.closable;
@@ -691,6 +750,13 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
             } else {
                 on_select(index, window, cx);
             }
+        })
+        .when_some(drag, |plate, drag| {
+            plate.on_drag(drag, |drag, _, _, cx| {
+                cx.stop_propagation();
+                let (title, icon) = (drag.title.clone(), drag.icon);
+                cx.new(|_| TabDragChip { title, icon })
+            })
         })
         .children(tab.icon.map(|path| TabGlyph { path }))
         .child(

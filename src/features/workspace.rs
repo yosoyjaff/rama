@@ -31,8 +31,8 @@ use crate::settings::{self, GroupColor, Rgb, SavePolicy, TabGroup};
 use crate::ui::icons;
 use crate::ui::popover::{self, Layer};
 use crate::ui::tab_strip::{
-    GroupLabel, Handler, Section as SectionLabel, StripEvents, StripItem, Tab, TruncatedLabel,
-    reveal, tab_strip,
+    DropHandler, GroupLabel, Handler, Section as SectionLabel, StripEvents, StripItem, Tab,
+    TruncatedLabel, reveal, tab_strip,
 };
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::Theme;
@@ -1123,7 +1123,21 @@ impl Workspace {
                     .ok();
             })
         };
+        let drop: DropHandler = {
+            let (handle, entries) = (handle.clone(), entries.clone());
+            Rc::new(move |dragged, onto, _, cx: &mut App| {
+                let (Some(&Target::Tab(index)), Some(&Target::Group(id))) =
+                    (entries.get(dragged), entries.get(onto))
+                else {
+                    return;
+                };
+                handle
+                    .update(cx, |workspace, cx| workspace.move_to_group(index, id, cx))
+                    .ok();
+            })
+        };
         let events = StripEvents {
+            drop,
             select,
             rename: {
                 let (handle, entries) = (handle.clone(), entries.clone());
