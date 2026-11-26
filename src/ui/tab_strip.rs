@@ -175,9 +175,21 @@ pub enum StripItem {
 }
 
 pub type Handler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
-/// A tab dropped: what was dragged, and the position of the plate it landed
-/// on, or `None` for the strip around the plates.
-pub type DropHandler = Rc<dyn Fn(&TabDrag, Option<usize>, &mut Window, &mut App)>;
+/// A tab dropped: what was dragged, and where it landed.
+pub type DropHandler = Rc<dyn Fn(&TabDrag, DropAt, &mut Window, &mut App)>;
+
+/// Where a dragged tab was dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropAt {
+    /// The strip around the plates.
+    Strip,
+    /// The plate at this position.
+    On(usize),
+    /// Just before the group at this position, outside it: the near half of
+    /// its plate or heading, which is the only way between two groups that
+    /// touch.
+    Before(usize),
+}
 pub type MenuHandler = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App)>;
 
 /// What the strip reports, each with the item's position in the strip. A
@@ -289,12 +301,15 @@ pub fn tab_strip(
         .track_scroll(scroll);
     // Around the plates, a dropped tab leaves its group.
     let around = drop.clone();
-    strip = strip.on_drop(move |drag: &TabDrag, window, cx| around(drag, None, window, cx));
+    strip =
+        strip.on_drop(move |drag: &TabDrag, window, cx| around(drag, DropAt::Strip, window, cx));
     for (index, item) in items.into_iter().enumerate() {
         strip = strip.child(match item {
             StripItem::Tab(tab) => plate(index, tab, column, events.clone()),
-            StripItem::Group(label) if column => group_heading(index, label, events.clone()),
-            StripItem::Group(label) => group_plate(index, label, events.clone()),
+            StripItem::Group(label) if column => {
+                group_heading(index, label, dragging, events.clone())
+            }
+            StripItem::Group(label) => group_plate(index, label, dragging, events.clone()),
             StripItem::Section(section) => section_label(index, section),
         });
     }
@@ -311,7 +326,7 @@ pub fn tab_strip(
         .items_center()
         .when(dragging, |zone| {
             zone.flex_1()
-                .on_drop(move |drag: &TabDrag, window, cx| drop(drag, None, window, cx))
+                .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::Strip, window, cx))
         })
         .child(strip)
         .into_any_element()
@@ -353,7 +368,12 @@ impl RenderOnce for SectionText {
 /// A group down a column: a chevron and its name. Folded, the chevron gives
 /// way to the group's colour until the pointer comes over it; an options
 /// button shows on hover.
-fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyElement {
+fn group_heading(
+    index: usize,
+    label: GroupLabel,
+    dragging: bool,
+    events: StripEvents,
+) -> AnyElement {
     let StripEvents {
         select,
         rename,
@@ -442,9 +462,13 @@ fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyEle
             cx.stop_propagation();
             menu(index, event.position, window, cx);
         })
-        // A tab dragged here joins the group.
+        // A tab dragged here joins the group; over the top half it goes
+        // just before it instead.
+        .when(dragging, |heading| {
+            heading.child(before_group(index, true, drop.clone()))
+        })
         .drag_over::<TabDrag>(|style, _, _, _| style.bg(wash(DROP_WASH)))
-        .on_drop(move |drag: &TabDrag, window, cx| drop(drag, Some(index), window, cx))
+        .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::On(index), window, cx))
         .on_click(move |event, window, cx| {
             cx.stop_propagation();
             // Each click of a double one folds or opens the group: the second
@@ -460,7 +484,7 @@ fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyEle
 /// A group across the band: one plate for all its tabs, its colour, its
 /// name and, while one of them is on screen, that tab's title. A click opens
 /// the dropdown that lists them.
-fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyElement {
+fn group_plate(index: usize, label: GroupLabel, dragging: bool, events: StripEvents) -> AnyElement {
     let StripEvents {
         select,
         rename,
@@ -473,6 +497,7 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
     div()
         .id(label.id.clone())
         .group(key.clone())
+        .relative()
         .h(px(PLATE_HEIGHT))
         .flex_none()
         .max_w(px(MAX_WIDTH))
@@ -510,9 +535,13 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
             cx.stop_propagation();
             menu(index, event.position, window, cx);
         })
-        // A tab dragged here joins the group.
+        // A tab dragged here joins the group; over the left half it goes
+        // just before it instead.
+        .when(dragging, |plate| {
+            plate.child(before_group(index, false, drop.clone()))
+        })
         .drag_over::<TabDrag>(|style, _, _, _| style.bg(wash(DROP_WASH)))
-        .on_drop(move |drag: &TabDrag, window, cx| drop(drag, Some(index), window, cx))
+        .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::On(index), window, cx))
         .on_click(move |event, window, cx| {
             cx.stop_propagation();
             // The first click of a double one opened the dropdown; the second
@@ -590,6 +619,29 @@ impl RenderOnce for TruncatedLabel {
             .child(self.text.clone())
             .child(overflow_probe(self.text, overflows))
     }
+}
+
+/// The near half of the group at strip position `index` while a tab is
+/// dragged — the top of a heading down a `column`, the left of a plate
+/// across the band: dropped there, the tab goes just before the group. It
+/// blocks the group under it, so only one of the two lights; the wheel
+/// still reaches the strip.
+fn before_group(index: usize, column: bool, drop: DropHandler) -> impl IntoElement {
+    let zone = div().absolute().top_0().left_0();
+    let zone = match column {
+        true => zone.right_0().h(gpui_kit::relative(0.5)),
+        false => zone.bottom_0().w(gpui_kit::relative(0.5)),
+    };
+    zone.id(("tab-group-before", index))
+        .block_mouse_except_scroll()
+        .drag_over::<TabDrag>(move |style, _, _, cx| {
+            let accent = Theme::of(cx).accent;
+            match column {
+                true => style.border_t(px(DROP_MARK)).border_color(accent),
+                false => style.border_l(px(DROP_MARK)).border_color(accent),
+            }
+        })
+        .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::Before(index), window, cx))
 }
 
 /// A group heading's chevron. Folded, it hides until the pointer comes
@@ -812,7 +864,7 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
                 _ => style.border_l(px(DROP_MARK)).border_color(accent),
             }
         })
-        .on_drop(move |drag: &TabDrag, window, cx| on_drop(drag, Some(index), window, cx))
+        .on_drop(move |drag: &TabDrag, window, cx| on_drop(drag, DropAt::On(index), window, cx))
         .children(tab.icon.map(|path| TabGlyph { path }))
         .child(
             div()
