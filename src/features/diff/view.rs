@@ -1319,7 +1319,10 @@ impl DiffView {
             .get(ix)
             .cloned()
             .unwrap_or_else(|| (0, String::new()));
-        let blame_cell = self.blame_on.then(|| self.render_blame_cell(ix, &theme));
+        let zone = crate::settings::read(cx, |settings| settings.history.dates);
+        let blame_cell = self
+            .blame_on
+            .then(|| self.render_blame_cell(ix, zone, &theme));
         let spans = self
             .file_highlights
             .as_ref()
@@ -1361,7 +1364,12 @@ impl DiffView {
     /// date print only on the first line of each run — repeating them down a
     /// 40-line block is noise. A row blame has no entry for keeps its slot, so
     /// the code column stays aligned down the file.
-    fn render_blame_cell(&self, ix: usize, theme: &Theme) -> AnyElement {
+    fn render_blame_cell(
+        &self,
+        ix: usize,
+        zone: crate::settings::DateZone,
+        theme: &Theme,
+    ) -> AnyElement {
         let slot = div().w(px(BLAME_WIDTH)).h_full().flex_none();
         let Some(blame) = &self.blame else {
             return slot.into_any_element();
@@ -1417,7 +1425,7 @@ impl DiffView {
                     .pr(px(6.0))
                     .text_size(ui_rems(10.0))
                     .text_color(theme.text_muted.opacity(0.55))
-                    .child(SharedString::from(compact_date(commit.authored_at))),
+                    .child(SharedString::from(compact_date(commit.authored_at, zone))),
             )
             .into_any_element()
     }
@@ -2424,21 +2432,23 @@ fn take_box(id: SharedString, checked: bool, theme: &Theme) -> gpui_kit::Statefu
 
 use crate::ui::tip::tip as tooltip;
 
-/// `Mon DD  HH:MM` this year, `Mon DD YYYY`
-/// before it, in local time.
-fn compact_date(seconds: i64) -> String {
-    use chrono::{Datelike as _, Local, TimeZone as _};
+/// `Mon DD  HH:MM` this year, `Mon DD YYYY` before it, on `zone`'s clock.
+fn compact_date(seconds: i64, zone: crate::settings::DateZone) -> String {
+    use chrono::Datelike as _;
     if seconds == 0 {
         return String::new();
     }
-    let Some(date) = Local.timestamp_opt(seconds, 0).single() else {
+    let Some(date) = chrono::DateTime::from_timestamp(seconds, 0) else {
         return String::new();
     };
-    if date.year() == Local::now().year() {
-        date.format("%b %d  %H:%M").to_string()
+    let date = date.fixed_offset();
+    let year = zone.format(date, "%Y");
+    let pattern = if year == chrono::Local::now().year().to_string() {
+        "%b %d  %H:%M"
     } else {
-        date.format("%b %d %Y").to_string()
-    }
+        "%b %d %Y"
+    };
+    zone.format(date, pattern)
 }
 
 impl Focusable for DiffView {
