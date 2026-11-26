@@ -4,6 +4,33 @@ All notable changes to Rama are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.10.0] - 2026-11-26
+
+### Added
+- Tabs can be dragged. Dropped beside another tab, a tab lands on that side
+  and takes its group, or none; dropped on a group it joins it; dropped at the
+  end of the strip it goes last, out of any group. A bar shows where it lands.
+- A group's dropdown rows drag out the same way, back into the strip.
+- Groups can be dragged whole, before or after another group, beside a tab or
+  to the end; their tabs move together.
+- Across the top, a tab can sit between two groups: the left half of a group
+  takes it just before the group.
+- A tab's menu can close the other tabs, the tabs to its right, or all of
+  them.
+- Rename tab heads a tab's menu. A double click renames a tab in a group's
+  dropdown, the tab a group shows across the top, or a group's heading down
+  the side.
+- Move to opens a tab's groups beside the menu.
+- A tooltip shows a group's name, or a name in a menu, when it is cut short.
+
+### Changed
+- Across the top, the strip follows the tabs' order: a group stands where its
+  tabs are, and the tab title gives way before the group's name.
+- A group with no tabs shows its colour dimmed.
+
+### Fixed
+- On Windows, cloning a local folder named the copy after the whole path.
+
 ## [0.9.0] - 2026-11-26
 
 ### Added
