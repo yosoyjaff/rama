@@ -4,7 +4,8 @@
 //! full width while they fit; when the band runs short they all give way
 //! together, the selected one only down to [`SELECTED_MIN_WIDTH`]. A title
 //! too long for its plate fades out over its last few pixels rather than
-//! ending in an ellipsis. On hover a close ✕ sits over the plate's right end.
+//! ending in an ellipsis, and shows in full in a tooltip. On hover a close ✕
+//! sits over the plate's right end.
 //!
 //! The strip knows nothing about what a tab contains: it takes what to draw
 //! and reports which plate was pressed.
@@ -17,10 +18,11 @@
 //! [`gpui_kit::ScrollHandle`] it passes in.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::{
-    AnyElement, App, ContentMask, ElementId, FontWeight, Hsla, IntoElement, MouseButton, Pixels,
-    Point, SharedString, TextAlign, TextRun, Window, canvas, div, prelude::*, px,
+    AnyElement, App, ContentMask, ElementId, Entity, FontWeight, Hsla, IntoElement, MouseButton,
+    Pixels, Point, SharedString, TextAlign, TextRun, Window, canvas, div, prelude::*, px,
 };
 
 use crate::ui::motion;
@@ -511,7 +513,7 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
     };
     let height = if column { ROW_HEIGHT } else { PLATE_HEIGHT };
     div()
-        .id(tab.id)
+        .id(tab.id.clone())
         .group(group.clone())
         .relative()
         .h(px(height))
@@ -574,6 +576,7 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
                 .map(|slot| match tab.editor {
                     Some(editor) => slot.child(editor),
                     None => slot.child(TabTitle {
+                        id: tab.id,
                         title: tab.title,
                         active: tab.active,
                         group: group.clone(),
@@ -624,31 +627,46 @@ impl RenderOnce for TabGlyph {
 }
 
 /// The title, dim unless its tab is selected or under the pointer. Painted
-/// by hand so an overflowing one fades out instead of ending in an ellipsis.
+/// by hand so an overflowing one fades out instead of ending in an ellipsis;
+/// that one also shows in full in a tooltip.
 #[derive(IntoElement)]
 struct TabTitle {
+    /// The tab's id, which keys whether its title overflowed last frame.
+    id: ElementId,
     title: SharedString,
     active: bool,
     group: SharedString,
 }
 
 impl RenderOnce for TabTitle {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let key = Arc::new(self.id);
+        let overflows = window.use_keyed_state(
+            ElementId::NamedChild(key.clone(), "title-overflows".into()),
+            cx,
+            |_, _| false,
+        );
         let theme = Theme::of(cx);
         let lit = theme.text;
+        let tip = overflows
+            .read(cx)
+            .then(|| crate::ui::tip::tip(self.title.clone()));
         div()
+            .id(ElementId::NamedChild(key, "title".into()))
             .size_full()
             .text_color(if self.active { lit } else { theme.text_muted })
             .group_hover(self.group, move |style| style.text_color(lit))
-            .child(faded_label(self.title))
+            .when_some(tip, |title, tip| title.tooltip(tip))
+            .child(faded_label(self.title, overflows))
     }
 }
 
 /// One line of text in the inherited style. Short text is left as is; text
 /// wider than the box fades to nothing over its last [`FADE`] pixels.
-fn faded_label(text: SharedString) -> impl IntoElement {
+/// `overflows` learns which of the two it was, for the next frame.
+fn faded_label(text: SharedString, overflows: Entity<bool>) -> impl IntoElement {
     canvas(
-        move |bounds, window, _| {
+        move |bounds, window, cx| {
             let style = window.text_style();
             let font_size = style.font_size.to_pixels(window.rem_size());
             let run = TextRun {
@@ -665,7 +683,16 @@ fn faded_label(text: SharedString) -> impl IntoElement {
                 std::slice::from_ref(&run),
                 None,
             );
-            if line.width() <= bounds.size.width || bounds.size.width <= px(0.0) {
+            let fits = line.width() <= bounds.size.width || bounds.size.width <= px(0.0);
+            // Measured here, after layout: the next frame adds or drops the
+            // tooltip.
+            overflows.update(cx, |overflows, cx| {
+                if *overflows == fits {
+                    *overflows = !fits;
+                    cx.notify();
+                }
+            });
+            if fits {
                 return line;
             }
             // One run per character, each dimmed by how close its centre
