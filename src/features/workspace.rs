@@ -31,7 +31,8 @@ use crate::settings::{self, GroupColor, Rgb, SavePolicy, TabGroup};
 use crate::ui::icons;
 use crate::ui::popover::{self, Layer};
 use crate::ui::tab_strip::{
-    GroupLabel, Handler, Section as SectionLabel, StripEvents, StripItem, Tab, reveal, tab_strip,
+    GroupLabel, Handler, Section as SectionLabel, StripEvents, StripItem, Tab, TruncatedLabel,
+    reveal, tab_strip,
 };
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::Theme;
@@ -1206,10 +1207,11 @@ impl Workspace {
         let closing = self.menu.leaving_since();
         let theme = Theme::of(cx).clone();
         let row = |id: String, label: String, danger: bool| {
-            popover::menu_row(&theme, false, SharedString::from(id.clone()))
-                .id(ElementId::Name(id.into()))
+            let id = ElementId::Name(id.into());
+            popover::menu_row(&theme, false, SharedString::from(id.to_string()))
+                .id(id.clone())
                 .when(danger, |row| row.text_color(theme.danger_muted))
-                .child(div().flex_1().min_w_0().truncate().child(label))
+                .child(TruncatedLabel::new(id, label))
         };
         let mut card = popover::popover_card(&theme)
             .w(px(MENU_WIDTH))
@@ -1371,14 +1373,17 @@ impl Workspace {
                         }
                         card = card.child(
                             popover::menu_row(&theme, index == self.active, key.clone())
-                                .id(ElementId::Name(key.into()))
+                                .id(ElementId::Name(key.clone().into()))
                                 .child(
                                     icons::icon(surface.icon())
                                         .flex_none()
                                         .size(px(14.0))
                                         .text_color(theme.text_muted),
                                 )
-                                .child(div().flex_1().min_w_0().truncate().child(surface.title()))
+                                .child(TruncatedLabel::new(
+                                    ElementId::Name(format!("{key}-title").into()),
+                                    surface.title(),
+                                ))
                                 // The tab's own menu, in place of the group's.
                                 .on_mouse_down(
                                     MouseButton::Right,
