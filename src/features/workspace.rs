@@ -98,6 +98,9 @@ pub struct Workspace {
     menu: Layer<TabMenu>,
     /// The group menu's custom colour, past its named shades.
     color_picker: Entity<ColorPickerState>,
+    /// A dropdown row was clicked once: the dropdown closes unless a second
+    /// click makes it a double one. Dropped, it stays.
+    dropdown_close: Option<gpui_kit::Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -146,6 +149,10 @@ const SWATCH: f32 = 16.0;
 const NEW_GROUP_BUTTON: f32 = 20.0;
 /// Between a group's plate and its dropdown.
 const DROPDOWN_GAP: f32 = 4.0;
+/// How long a dropdown waits after a click for the second of a double one:
+/// a little over the platforms' own windows (400 ms on Linux, 500 ms by
+/// default on macOS and Windows).
+const DOUBLE_CLICK_WAIT: std::time::Duration = std::time::Duration::from_millis(520);
 
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -186,6 +193,7 @@ impl Workspace {
             groups: Vec::new(),
             menu: Layer::default(),
             color_picker,
+            dropdown_close: None,
             _subscriptions: subscriptions,
         };
         // The tabs the last session left open come back — but UNLOADED: only
@@ -582,6 +590,10 @@ impl Workspace {
                 self.sync_window_title(window);
             }
         }
+        // A row edited in a dropdown: the edit was what it was open for.
+        if self.menu.shown().is_some_and(|menu| menu.listing) {
+            self.close_menu(cx);
+        }
         if refocus {
             window.focus(&self.focus_handle, cx);
         }
@@ -936,6 +948,28 @@ impl Workspace {
         self.menu.dismiss(cx, |workspace| &mut workspace.menu);
     }
 
+    /// Close the dropdown once a click can no longer turn into a double one,
+    /// which edits the row instead.
+    fn close_dropdown_unless_clicked_again(&mut self, cx: &mut Context<Self>) {
+        self.dropdown_close = Some(cx.spawn(async move |workspace, cx| {
+            cx.background_executor().timer(DOUBLE_CLICK_WAIT).await;
+            workspace
+                .update(cx, |workspace, cx| {
+                    workspace.dropdown_close = None;
+                    workspace.close_menu(cx);
+                })
+                .ok();
+        }));
+    }
+
+    /// Whether group `id`'s dropdown is on screen across the band, fading
+    /// out included.
+    fn dropdown_open(&self, id: u64) -> bool {
+        self.menu
+            .shown()
+            .is_some_and(|menu| menu.listing && menu.target == Target::Group(id))
+    }
+
     /// Start the colour picker from group `id`'s colour, whichever it is.
     fn show_group_color(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         let Some(color) = self.group(id).map(|group| group.color) else {
@@ -1004,9 +1038,10 @@ impl Workspace {
                     let on_screen = self.group_of(active) == Some(id);
                     // Across the band a group's tabs have no plate of their
                     // own: the one on screen is renamed in its group's.
+                    // Unless its dropdown is open: there the row is edited.
                     let editor = editing(entry)
                         .or_else(|| {
-                            (!column && on_screen)
+                            (!column && on_screen && !self.dropdown_open(id))
                                 .then(|| editing(Target::Tab(active)))
                                 .flatten()
                         })
@@ -1178,12 +1213,22 @@ impl Workspace {
         };
         let mut card = popover::popover_card(&theme)
             .w(px(MENU_WIDTH))
-            .on_mouse_down_out(cx.listener(|workspace, _, _, cx| {
+            .on_mouse_down_out(cx.listener(|workspace, _, window, cx| {
                 // The picker's own popover lies outside the menu: a press in
                 // it is not a press away from the menu.
-                if !workspace.color_picker.read(cx).is_open() {
-                    workspace.close_menu(cx);
+                if workspace.color_picker.read(cx).is_open() {
+                    return;
                 }
+                // A row being edited keeps what was typed, as a tab does.
+                let editing_row = workspace.menu.shown().is_some_and(|menu| menu.listing)
+                    && workspace
+                        .renaming
+                        .as_ref()
+                        .is_some_and(|renaming| matches!(renaming.target, Target::Tab(_)));
+                if editing_row {
+                    workspace.finish_rename(true, false, window, cx);
+                }
+                workspace.close_menu(cx);
             }));
         match target {
             Target::Tab(index) => {
@@ -1312,6 +1357,18 @@ impl Workspace {
                     for index in members {
                         let surface = &self.tabs[index];
                         let key = format!("tab-menu-tab-{index}");
+                        if let Some(input) = self
+                            .renaming
+                            .as_ref()
+                            .filter(|renaming| renaming.target == Target::Tab(index))
+                            .map(|renaming| renaming.input.clone())
+                        {
+                            card = card.child(
+                                popover::menu_row(&theme, true, key)
+                                    .child(self.render_rename(&input, cx)),
+                            );
+                            continue;
+                        }
                         card = card.child(
                             popover::menu_row(&theme, index == self.active, key.clone())
                                 .id(ElementId::Name(key.into()))
@@ -1337,10 +1394,18 @@ impl Workspace {
                                         },
                                     ),
                                 )
-                                .on_click(cx.listener(move |workspace, _, window, cx| {
-                                    workspace.close_menu(cx);
-                                    workspace.activate(index, window, cx);
-                                })),
+                                .on_click(cx.listener(
+                                    move |workspace, event: &gpui_kit::ClickEvent, window, cx| {
+                                        if event.click_count() == 2 {
+                                            // Edited in its row, the dropdown open.
+                                            workspace.dropdown_close = None;
+                                            workspace.start_rename(Target::Tab(index), window, cx);
+                                        } else {
+                                            workspace.activate(index, window, cx);
+                                            workspace.close_dropdown_unless_clicked_again(cx);
+                                        }
+                                    },
+                                )),
                         );
                     }
                     card = card.child(popover::menu_separator());
@@ -1595,6 +1660,38 @@ mod tests {
                 assert_eq!(
                     workspace.renaming.as_ref().map(|renaming| renaming.target),
                     Some(Target::Tab(1))
+                );
+            })
+            .expect("window update");
+    }
+
+    #[gpui_kit::test]
+    fn a_row_renamed_in_its_dropdown_saves_and_closes_it(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace.open_repository("/repos/one".into(), window, cx);
+                workspace.new_group(1, window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                let id = workspace.groups[0].id;
+                workspace.menu.open(TabMenu {
+                    at: gpui_kit::point(px(0.0), px(0.0)),
+                    target: Target::Group(id),
+                    listing: true,
+                });
+                assert!(workspace.dropdown_open(id));
+
+                workspace.start_rename(Target::Tab(1), window, cx);
+                let input = workspace.renaming.as_ref().unwrap().input.clone();
+                input.update(cx, |input, cx| {
+                    input.set_text("Work".to_string(), window, cx)
+                });
+                workspace.finish_rename(true, true, window, cx);
+
+                assert_eq!(titles(workspace), vec!["Home", "Work"]);
+                assert!(
+                    !workspace.menu.is_open(),
+                    "the edit was what it was open for"
                 );
             })
             .expect("window update");
