@@ -8,10 +8,101 @@
 //! foreground: [`crate::git::history`] and its neighbours are meant to run on
 //! `cx.background_executor()`, with the result applied back on the UI thread.
 
+use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
+
+/// How long a git command may run before it is stopped, in milliseconds;
+/// zero for as long as it takes. The app sets it from the settings: this
+/// layer does not read them.
+static TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Stop every git command that runs longer than `limit` from now on; `None`
+/// lets them run to the end.
+pub fn set_timeout(limit: Option<Duration>) {
+    let ms = limit.map_or(0, |limit| limit.as_millis().max(1) as u64);
+    TIMEOUT_MS.store(ms, Ordering::Relaxed);
+}
+
+fn timeout() -> Option<Duration> {
+    match TIMEOUT_MS.load(Ordering::Relaxed) {
+        0 => None,
+        ms => Some(Duration::from_millis(ms)),
+    }
+}
+
+/// Run `command` (`git <args>`) to the end, or kill it once the timeout set
+/// with [`set_timeout`] has passed.
+pub(crate) fn output(command: &mut Command, args: &[&str]) -> Result<Output> {
+    output_within(command, args, timeout())
+}
+
+/// The longest a wait between two looks at a running command gets: what a
+/// timed command can lose on top of its own time.
+const MAX_NAP: Duration = Duration::from_millis(50);
+
+fn output_within(command: &mut Command, args: &[&str], limit: Option<Duration>) -> Result<Output> {
+    let Some(limit) = limit else {
+        return command
+            .output()
+            .map_err(|e| anyhow!("git spawn failed: {e}"));
+    };
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|e| anyhow!("git spawn failed: {e}"))?;
+    // Drained as it comes, or a chatty command fills the pipe and stalls.
+    fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    }
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let deadline = Instant::now() + limit;
+    // Short at first, so quick commands lose nothing, then longer.
+    let mut nap = Duration::from_millis(1);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            // The readers end when whatever git started lets go of the
+            // pipes; nothing waits for them.
+            bail!(
+                "git {} timed out after {}",
+                args.first().unwrap_or(&"?"),
+                describe(limit)
+            );
+        }
+        std::thread::sleep(nap.min(deadline - now));
+        nap = (nap * 2).min(MAX_NAP);
+    };
+    Ok(Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
+}
+
+/// `30 s`, `5 min`.
+fn describe(limit: Duration) -> String {
+    match limit.as_secs() {
+        secs if secs >= 60 && secs % 60 == 0 => format!("{} min", secs / 60),
+        secs => format!("{secs} s"),
+    }
+}
 
 /// Run `git <args>` inside `cwd` and return its trimmed stdout.
 ///
@@ -74,9 +165,7 @@ fn spawn(cwd: &Path, args: &[&str]) -> Result<Vec<u8>> {
     command.env("LC_ALL", "C");
     no_console_window(&mut command);
 
-    let output = command
-        .output()
-        .map_err(|e| anyhow!("git spawn failed: {e}"))?;
+    let output = output(&mut command, args)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let message = stderr.trim();
@@ -118,6 +207,42 @@ mod tests {
         let sha = git(repo.path(), &["rev-parse", "HEAD"]).unwrap();
         assert_eq!(sha.len(), 40, "{sha:?} is not a full sha");
         assert!(!sha.ends_with('\n'));
+    }
+
+    #[test]
+    fn a_timed_command_runs_to_the_end_inside_its_limit() {
+        let output = output_within(
+            Command::new("git").arg("--version"),
+            &["--version"],
+            Some(Duration::from_secs(30)),
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).starts_with("git version"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_past_its_limit_is_stopped() {
+        let started = Instant::now();
+        let error = output_within(
+            Command::new("sleep").arg("5"),
+            &["fetch"],
+            Some(Duration::from_millis(100)),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(error, "git fetch timed out after 0 s");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "it waited it out"
+        );
+    }
+
+    #[test]
+    fn a_limit_reads_in_seconds_or_minutes() {
+        assert_eq!(describe(Duration::from_secs(30)), "30 s");
+        assert_eq!(describe(Duration::from_secs(300)), "5 min");
     }
 
     #[test]

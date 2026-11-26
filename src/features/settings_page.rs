@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use crate::features::command_line::{self, CommandStatus, InstallCommandLine};
 use crate::recents;
-use crate::settings::{self, Accent, DateZone, Mode, SavePolicy, Settings, TabSide};
+use crate::settings::{self, Accent, DateZone, GitTimeout, Mode, SavePolicy, Settings, TabSide};
 use crate::ui::lane_palette::LanePalette;
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::{AccentColor, Theme, wash};
@@ -775,6 +775,19 @@ impl SettingsPage {
                     theme,
                     cx,
                     |settings, zone| settings.history.dates = zone,
+                ),
+                theme,
+            ),
+            self.row(
+                "Command timeout",
+                "Stop a git command that runs longer than this.",
+                self.choices(
+                    "settings-git-timeout",
+                    &GitTimeout::EVERY,
+                    settings.history.timeout,
+                    theme,
+                    cx,
+                    |settings, timeout| settings.history.timeout = timeout,
                 ),
                 theme,
             ),
