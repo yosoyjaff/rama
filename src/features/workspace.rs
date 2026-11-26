@@ -800,6 +800,51 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The project tabs the menu's bulk closes act on: every one but Home
+    /// and the settings, in strip order.
+    fn project_tabs(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..self.tabs.len()).filter(|&index| matches!(self.tabs[index], Surface::Repo { .. }))
+    }
+
+    /// Close every project tab `doomed` names, then show `keep` — by where it
+    /// was before the closes moved it.
+    fn close_tabs(
+        &mut self,
+        doomed: Vec<usize>,
+        keep: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // From the end, so the indices still to close stay where they were.
+        for &index in doomed.iter().rev() {
+            self.close(index, window, cx);
+        }
+        if let Some(keep) = keep {
+            let shifted = keep - doomed.iter().filter(|&&index| index < keep).count();
+            self.activate(shifted, window, cx);
+        }
+    }
+
+    fn close_others(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let doomed = self
+            .project_tabs()
+            .filter(|&other| other != index)
+            .collect();
+        self.close_tabs(doomed, Some(index), window, cx);
+    }
+
+    fn close_to_the_right(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let doomed: Vec<usize> = self.project_tabs().filter(|&other| other > index).collect();
+        // Only when the tab on screen goes: the settings stay where they are.
+        let keep = doomed.contains(&self.active).then_some(index);
+        self.close_tabs(doomed, keep, window, cx);
+    }
+
+    fn close_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let doomed = self.project_tabs().collect();
+        self.close_tabs(doomed, None, window, cx);
+    }
+
     fn close_group(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         let members: Vec<usize> = (0..self.tabs.len())
             .filter(|&index| self.group_of(index) == Some(id))
@@ -1186,6 +1231,45 @@ impl Workspace {
                             workspace.close(index, window, cx);
                         },
                     )),
+                );
+                // Only what would close something.
+                if self.project_tabs().any(|other| other != index) {
+                    card = card.child(
+                        row(
+                            "tab-menu-close-others".into(),
+                            "Close other tabs".into(),
+                            false,
+                        )
+                        .on_click(cx.listener(
+                            move |workspace, _, window, cx| {
+                                workspace.close_menu(cx);
+                                workspace.close_others(index, window, cx);
+                            },
+                        )),
+                    );
+                }
+                if self.project_tabs().any(|other| other > index) {
+                    card = card.child(
+                        row(
+                            "tab-menu-close-right".into(),
+                            "Close tabs to the right".into(),
+                            false,
+                        )
+                        .on_click(cx.listener(
+                            move |workspace, _, window, cx| {
+                                workspace.close_menu(cx);
+                                workspace.close_to_the_right(index, window, cx);
+                            },
+                        )),
+                    );
+                }
+                card = card.child(
+                    row("tab-menu-close-all".into(), "Close all tabs".into(), false).on_click(
+                        cx.listener(move |workspace, _, window, cx| {
+                            workspace.close_menu(cx);
+                            workspace.close_all(window, cx);
+                        }),
+                    ),
                 );
             }
             Target::Section(_) => return None,
@@ -1681,6 +1765,46 @@ mod tests {
                 assert_eq!(workspace.active, 1, "back to the project");
                 workspace.close(1, window, cx);
                 assert_eq!(workspace.active, 0, "back to home");
+            })
+            .expect("window update");
+    }
+
+    #[gpui_kit::test]
+    fn the_bulk_closes_close_only_projects_and_keep_the_one_asked_for(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                let open = |workspace: &mut Workspace,
+                            window: &mut Window,
+                            cx: &mut Context<Workspace>| {
+                    for name in ["one", "two", "three", "four"] {
+                        workspace.open_repository(format!("/repos/{name}"), window, cx);
+                    }
+                };
+
+                open(workspace, window, cx);
+                workspace.activate(4, window, cx);
+                workspace.close_to_the_right(2, window, cx);
+                assert_eq!(titles(workspace), vec!["Home", "one", "two"]);
+                assert_eq!(
+                    workspace.active, 2,
+                    "the active tab closed: its menu's tab shows"
+                );
+
+                workspace.activate(1, window, cx);
+                workspace.close_to_the_right(1, window, cx);
+                assert_eq!(titles(workspace), vec!["Home", "one"]);
+                assert_eq!(workspace.active, 1, "the active tab stays");
+
+                workspace.close_all(window, cx);
+                open(workspace, window, cx);
+                workspace.close_others(3, window, cx);
+                assert_eq!(titles(workspace), vec!["Home", "three"]);
+                assert_eq!(workspace.active, 1);
+
+                workspace.open_settings(window, cx);
+                workspace.close_all(window, cx);
+                assert_eq!(titles(workspace), vec!["Home", "Settings"]);
             })
             .expect("window update");
     }
