@@ -121,6 +121,19 @@ enum Dropped {
     BeforeGroup(u64),
 }
 
+/// Where a whole group was dropped, in the workspace's terms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GroupDropped {
+    Last,
+    Before(u64),
+    After(u64),
+    /// Beside tab `tab` — or beside its group, when it is in one.
+    Beside {
+        tab: usize,
+        after: bool,
+    },
+}
+
 /// Something in the strip: a tab, by its index in `tabs`, a group, by its
 /// id, or a column's section label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1054,6 +1067,76 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Group `id` dropped `at` a place: its tabs move there together, in
+    /// their order, and the groups' own order follows theirs.
+    fn drop_group(&mut self, id: u64, at: GroupDropped, cx: &mut Context<Self>) {
+        let span = |workspace: &Self, other: u64| workspace.group_span(other);
+        // The gap in the tabs it goes into.
+        let gap = match at {
+            GroupDropped::Last => self.project_tabs().last().map_or(1, |last| last + 1),
+            GroupDropped::Before(other) if other != id => match span(self, other) {
+                Some((first, _)) => first,
+                None => return,
+            },
+            GroupDropped::After(other) if other != id => match span(self, other) {
+                Some((_, last)) => last + 1,
+                None => return,
+            },
+            GroupDropped::Beside { tab, after } => match self.group_of(tab) {
+                Some(other) if other == id => return,
+                Some(other) => match (span(self, other), after) {
+                    (Some((_, last)), true) => last + 1,
+                    (Some((first, _)), false) => first,
+                    (None, _) => return,
+                },
+                None if after => tab + 1,
+                None => tab,
+            },
+            GroupDropped::Before(_) | GroupDropped::After(_) => return,
+        };
+        self.close_menu(cx);
+        self.move_group(id, gap.max(1));
+        self.persist_tabs(cx);
+        cx.notify();
+    }
+
+    /// Move group `id`'s tabs, in their order, into the gap before tab
+    /// `gap` (counted before the move), then put the groups in the order of
+    /// their tabs — a group with none last.
+    fn move_group(&mut self, id: u64, gap: usize) {
+        let members: Vec<usize> = self.member_indices(id).collect();
+        if members.is_empty() {
+            return;
+        }
+        let mut order: Vec<usize> = (0..self.tabs.len())
+            .filter(|index| !members.contains(index))
+            .collect();
+        let at = order.iter().filter(|&&index| index < gap).count();
+        order.splice(at..at, members.iter().copied());
+        self.renaming = None;
+        let mut old: Vec<Option<Surface>> = self.tabs.drain(..).map(Some).collect();
+        self.tabs = order
+            .iter()
+            .filter_map(|&index| old[index].take())
+            .collect();
+        self.active = moved_to(&order, self.active);
+        self.before_settings = self.before_settings.map(|index| moved_to(&order, index));
+        let first: Vec<(u64, usize)> = self
+            .groups
+            .iter()
+            .map(|group| {
+                let at = self.member_indices(group.id).next().unwrap_or(usize::MAX);
+                (group.id, at)
+            })
+            .collect();
+        self.groups.sort_by_key(|group| {
+            first
+                .iter()
+                .find(|(id, _)| *id == group.id)
+                .map_or(usize::MAX, |(_, at)| *at)
+        });
+    }
+
     /// Open or fold Move to's groups, while the menu is open.
     fn set_move_open(&mut self, open: bool, cx: &mut Context<Self>) {
         if let Some(menu) = self.menu.live_mut()
@@ -1202,6 +1285,7 @@ impl Workspace {
         let drop: DropHandler = {
             let (handle, entries) = (handle.clone(), entries.clone());
             Rc::new(move |drag: &TabDrag, at: DropAt, _, cx: &mut App| {
+                let target = |position: usize| entries.get(position).copied();
                 let index = match drag.from {
                     DragFrom::Strip(position) => match entries.get(position) {
                         Some(&Target::Tab(index)) => index,
@@ -1209,8 +1293,33 @@ impl Workspace {
                     },
                     // A row of a group's dropdown names its tab.
                     DragFrom::Owner(index) => index,
+                    DragFrom::Group(position) => {
+                        let Some(Target::Group(id)) = target(position) else {
+                            return;
+                        };
+                        let at = match at {
+                            DropAt::Strip => GroupDropped::Last,
+                            DropAt::On(position) | DropAt::After(position) => {
+                                match target(position) {
+                                    Some(Target::Group(other)) => GroupDropped::After(other),
+                                    _ => return,
+                                }
+                            }
+                            DropAt::Before(position) => match target(position) {
+                                Some(Target::Group(other)) => GroupDropped::Before(other),
+                                _ => return,
+                            },
+                            DropAt::Beside { tab, after } => match target(tab) {
+                                Some(Target::Tab(tab)) => GroupDropped::Beside { tab, after },
+                                _ => return,
+                            },
+                        };
+                        handle
+                            .update(cx, |workspace, cx| workspace.drop_group(id, at, cx))
+                            .ok();
+                        return;
+                    }
                 };
-                let target = |position: usize| entries.get(position).copied();
                 let at = match at {
                     DropAt::Strip => Dropped::Strip,
                     DropAt::On(position) => match target(position) {
@@ -1225,6 +1334,8 @@ impl Workspace {
                         Some(Target::Group(id)) => Dropped::BeforeGroup(id),
                         _ => return,
                     },
+                    // Only a group is dropped after one.
+                    DropAt::After(_) => return,
                 };
                 handle
                     .update(cx, |workspace, cx| workspace.drop_tab(index, at, cx))
@@ -1747,6 +1858,12 @@ fn shifted_by_move(index: usize, from: usize, to: usize) -> usize {
     }
 }
 
+/// Where the tab at `index` stands in `order`, a list of old indices in
+/// their new order.
+fn moved_to(order: &[usize], index: usize) -> usize {
+    order.iter().position(|&old| old == index).unwrap_or(index)
+}
+
 /// Where index `index` ends up once the tab at `removed` closes.
 fn shifted_by_removal(index: usize, removed: usize) -> usize {
     if index > removed { index - 1 } else { index }
@@ -1933,6 +2050,72 @@ mod tests {
         (0..workspace.tabs.len())
             .map(|index| workspace.group_of(index))
             .collect()
+    }
+
+    #[gpui_kit::test]
+    fn a_dragged_group_moves_its_tabs_together(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                for name in ["one", "two", "three", "four"] {
+                    workspace.open_repository(format!("/repos/{name}"), window, cx);
+                }
+                // one + two in A, three in B, four loose.
+                workspace.new_group(1, window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                let a = workspace.groups[0].id;
+                workspace.move_to_group(2, a, cx);
+                workspace.new_group(3, window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                let b = workspace.groups[1].id;
+                workspace.activate(2, window, cx);
+                assert_eq!(
+                    titles(workspace),
+                    vec!["Home", "one", "two", "three", "four"]
+                );
+
+                workspace.drop_group(a, GroupDropped::After(b), cx);
+                assert_eq!(
+                    titles(workspace),
+                    vec!["Home", "three", "one", "two", "four"]
+                );
+                assert_eq!(
+                    workspace.active, 3,
+                    "the tab on screen moves with its group"
+                );
+                let order: Vec<u64> = workspace.groups.iter().map(|g| g.id).collect();
+                assert_eq!(order, vec![b, a], "the groups follow their tabs");
+
+                workspace.drop_group(a, GroupDropped::Before(b), cx);
+                assert_eq!(
+                    titles(workspace),
+                    vec!["Home", "one", "two", "three", "four"]
+                );
+
+                workspace.drop_group(a, GroupDropped::Last, cx);
+                assert_eq!(
+                    titles(workspace),
+                    vec!["Home", "three", "four", "one", "two"]
+                );
+
+                workspace.drop_group(
+                    b,
+                    GroupDropped::Beside {
+                        tab: 2,
+                        after: true,
+                    },
+                    cx,
+                );
+                assert_eq!(
+                    titles(workspace),
+                    vec!["Home", "four", "three", "one", "two"]
+                );
+                assert_eq!(
+                    workspace.strip_entries(false),
+                    vec![Target::Tab(1), Target::Group(b), Target::Group(a)]
+                );
+            })
+            .expect("window update");
     }
 
     #[gpui_kit::test]
