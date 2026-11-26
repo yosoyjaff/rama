@@ -31,8 +31,8 @@ use crate::settings::{self, GroupColor, Rgb, SavePolicy, TabGroup};
 use crate::ui::icons;
 use crate::ui::popover::{self, Layer};
 use crate::ui::tab_strip::{
-    DropHandler, GroupLabel, Handler, Section as SectionLabel, StripEvents, StripItem, Tab,
-    TruncatedLabel, reveal, tab_strip,
+    DragFrom, DropHandler, GroupLabel, Handler, Section as SectionLabel, StripEvents, StripItem,
+    Tab, TabDrag, TruncatedLabel, reveal, tab_strip,
 };
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::Theme;
@@ -978,6 +978,27 @@ impl Workspace {
         }));
     }
 
+    /// Tab `index` dropped on `onto`: a group, or a tab, takes it into its
+    /// group, or out of any for a tab in none; the strip itself (`None`)
+    /// takes it out of its group.
+    fn drop_tab(&mut self, index: usize, onto: Option<Target>, cx: &mut Context<Self>) {
+        if index == 0 || index >= self.tabs.len() {
+            return;
+        }
+        let into = match onto {
+            Some(Target::Group(id)) => Some(id),
+            Some(Target::Tab(other)) => self.group_of(other),
+            Some(Target::Section(_)) | None => None,
+        };
+        // Dropped from a dropdown, which has served its purpose.
+        self.close_menu(cx);
+        match into {
+            Some(id) => self.move_to_group(index, id, cx),
+            None if self.group_of(index).is_some() => self.remove_from_group(index, cx),
+            None => {}
+        }
+    }
+
     /// Open or fold Move to's groups, while the menu is open.
     fn set_move_open(&mut self, open: bool, cx: &mut Context<Self>) {
         if let Some(menu) = self.menu.live_mut()
@@ -1125,14 +1146,18 @@ impl Workspace {
         };
         let drop: DropHandler = {
             let (handle, entries) = (handle.clone(), entries.clone());
-            Rc::new(move |dragged, onto, _, cx: &mut App| {
-                let (Some(&Target::Tab(index)), Some(&Target::Group(id))) =
-                    (entries.get(dragged), entries.get(onto))
-                else {
-                    return;
+            Rc::new(move |drag: &TabDrag, onto, _, cx: &mut App| {
+                let index = match drag.from {
+                    DragFrom::Strip(position) => match entries.get(position) {
+                        Some(&Target::Tab(index)) => index,
+                        _ => return,
+                    },
+                    // A row of a group's dropdown names its tab.
+                    DragFrom::Owner(index) => index,
                 };
+                let onto = onto.and_then(|position| entries.get(position).copied());
                 handle
-                    .update(cx, |workspace, cx| workspace.move_to_group(index, id, cx))
+                    .update(cx, |workspace, cx| workspace.drop_tab(index, onto, cx))
                     .ok();
             })
         };
@@ -1496,6 +1521,18 @@ impl Workspace {
                                     ElementId::Name(format!("{key}-title").into()),
                                     surface.title(),
                                 ))
+                                // Dragged out to the strip, it leaves the group.
+                                .on_drag(
+                                    TabDrag::new(
+                                        DragFrom::Owner(index),
+                                        surface.title(),
+                                        Some(surface.icon()),
+                                    ),
+                                    |drag, _, _, cx| {
+                                        cx.stop_propagation();
+                                        drag.chip(cx)
+                                    },
+                                )
                                 // The tab's own menu, in place of the group's.
                                 .on_mouse_down(
                                     MouseButton::Right,
@@ -1819,6 +1856,34 @@ mod tests {
         (0..workspace.tabs.len())
             .map(|index| workspace.group_of(index))
             .collect()
+    }
+
+    #[gpui_kit::test]
+    fn a_dropped_tab_goes_where_it_lands(cx: &mut TestAppContext) {
+        let window = workspace(cx);
+        window
+            .update(cx, |workspace, window, cx| {
+                for name in ["one", "two", "three"] {
+                    workspace.open_repository(format!("/repos/{name}"), window, cx);
+                }
+                workspace.new_group(1, window, cx);
+                workspace.finish_rename(true, true, window, cx);
+                let id = workspace.groups[0].id;
+                assert_eq!(groups_of(workspace), vec![None, Some(id), None, None]);
+
+                workspace.drop_tab(3, Some(Target::Group(id)), cx);
+                assert_eq!(groups_of(workspace), vec![None, Some(id), Some(id), None]);
+
+                workspace.drop_tab(1, None, cx);
+                assert_eq!(groups_of(workspace), vec![None, Some(id), None, None]);
+
+                workspace.drop_tab(3, Some(Target::Tab(1)), cx);
+                assert_eq!(groups_of(workspace), vec![None, Some(id), Some(id), None]);
+
+                workspace.drop_tab(0, Some(Target::Group(id)), cx);
+                assert_eq!(workspace.group_of(0), None, "home stays out of groups");
+            })
+            .expect("window update");
     }
 
     #[gpui_kit::test]
