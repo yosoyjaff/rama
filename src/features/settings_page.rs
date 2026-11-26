@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use crate::features::command_line::{self, CommandStatus, InstallCommandLine};
 use crate::recents;
-use crate::settings::{self, Accent, Mode, SavePolicy, Settings, TabSide};
+use crate::settings::{self, Accent, DateZone, Mode, SavePolicy, Settings, TabSide};
 use crate::ui::lane_palette::LanePalette;
 use crate::ui::text_input::{TextInput, TextInputEvent};
 use crate::ui::theme::{AccentColor, Theme, wash};
@@ -762,6 +762,19 @@ impl SettingsPage {
                     |settings| {
                         settings.history.columns.sha.shown = !settings.history.columns.sha.shown
                     },
+                ),
+                theme,
+            ),
+            self.row(
+                "Dates",
+                "Show when commits were written in this computer's time or in UTC.",
+                self.choices(
+                    "settings-dates",
+                    &[(DateZone::Local, "Local"), (DateZone::Utc, "UTC")],
+                    settings.history.dates,
+                    theme,
+                    cx,
+                    |settings, zone| settings.history.dates = zone,
                 ),
                 theme,
             ),

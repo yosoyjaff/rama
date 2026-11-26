@@ -8,6 +8,7 @@ use super::work::Fetched;
 use super::{DetailPanel, Tally};
 use crate::features::history::history_author_name;
 use crate::git::Commit;
+use crate::settings::{self, DateZone};
 use crate::ui::avatar::{author_initials, author_tint};
 use crate::ui::theme::{self, Theme};
 
@@ -15,15 +16,14 @@ use crate::ui::theme::{self, Theme};
 /// push the byline and the files out of the panel.
 const MESSAGE_MAX_HEIGHT: f32 = 160.0;
 
-/// When a commit was written, in local time, as `04/03/2026 @ 10:15`; a
-/// dash if git's date does not parse.
-fn written_at(rfc3339: &str) -> String {
+/// When a commit was written, on `zone`'s clock, as `04/03/2026 @ 10:15`
+/// (with ` UTC` after it in UTC); a dash if git's date does not parse.
+fn written_at(rfc3339: &str, zone: DateZone) -> String {
     chrono::DateTime::parse_from_rfc3339(rfc3339).map_or_else(
         |_| "—".to_owned(),
-        |date| {
-            date.with_timezone(&chrono::Local)
-                .format("%d/%m/%Y @ %H:%M")
-                .to_string()
+        |date| match zone {
+            DateZone::Local => zone.format(date, "%d/%m/%Y @ %H:%M"),
+            DateZone::Utc => zone.format(date, "%d/%m/%Y @ %H:%M UTC"),
         },
     )
 }
@@ -48,7 +48,11 @@ impl DetailPanel {
             .flex()
             .flex_col()
             .child(message(commit, theme))
-            .child(byline(commit, theme))
+            .child(byline(
+                commit,
+                settings::read(cx, |settings| settings.history.dates),
+                theme,
+            ))
             .children(self.totals(theme))
             .child(self.listing_bar(theme, cx))
             .child(self.commit_files(theme, cx))
@@ -155,7 +159,7 @@ fn message(commit: &Commit, theme: &Theme) -> AnyElement {
 
 /// The author's initials on their colour, their name and the date, and
 /// the commit this one follows.
-fn byline(commit: &Commit, theme: &Theme) -> AnyElement {
+fn byline(commit: &Commit, zone: DateZone, theme: &Theme) -> AnyElement {
     let name = history_author_name(&commit.author.name);
     // The colour follows the email, so one person keeps it across names.
     let tint_key = match commit.author.email.trim() {
@@ -193,7 +197,7 @@ fn byline(commit: &Commit, theme: &Theme) -> AnyElement {
                 .text_color(theme.text_faint)
                 .child(SharedString::from(format!(
                     "authored {}",
-                    written_at(&commit.author.when)
+                    written_at(&commit.author.when, zone)
                 ))),
         );
     let parent = commit.parents.first().map(|sha| {
@@ -230,8 +234,12 @@ mod tests {
 
     #[test]
     fn dates_are_local_and_bad_ones_a_dash() {
-        assert_eq!(written_at("yesterday"), "—");
-        let written = written_at("2026-03-04T10:15:00+00:00");
+        assert_eq!(written_at("yesterday", DateZone::Local), "—");
+        let written = written_at("2026-03-04T10:15:00+00:00", DateZone::Local);
         assert!(written.contains("/2026 @ "), "{written}");
+        assert_eq!(
+            written_at("2026-03-04T22:15:00-05:00", DateZone::Utc),
+            "05/03/2026 @ 03:15 UTC"
+        );
     }
 }

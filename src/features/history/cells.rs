@@ -6,14 +6,15 @@ use gpui_kit::{App, Hsla, ImageFormat, SharedString};
 
 use super::detail::{Change, Tally};
 use crate::git::GitStatusEntry;
-use crate::settings;
+use crate::settings::{self, DateZone};
 use crate::ui::lane_palette::LanePalette;
 use crate::ui::theme::Theme;
 
-/// A commit's date as the date column shows it: `Mar 4, 2026`.
-pub(super) fn format_date(value: &str) -> String {
+/// A commit's date as the date column shows it, on `zone`'s clock:
+/// `Mar 4, 2026`.
+pub(super) fn format_date(value: &str, zone: DateZone) -> String {
     match DateTime::parse_from_rfc3339(value) {
-        Ok(date) => date.format("%b %-d, %Y").to_string(),
+        Ok(date) => zone.format(date, "%b %-d, %Y"),
         Err(_) => "—".to_string(),
     }
 }
@@ -116,8 +117,16 @@ mod tests {
 
     #[test]
     fn dates_read_as_month_day_year() {
-        assert_eq!(format_date("2026-03-04T10:00:00+01:00"), "Mar 4, 2026");
-        assert_eq!(format_date("yesterday"), "—");
+        assert_eq!(
+            format_date("2026-03-04T10:00:00+01:00", DateZone::Utc),
+            "Mar 4, 2026"
+        );
+        // Late in the evening in New York is the next day in UTC.
+        assert_eq!(
+            format_date("2026-03-04T22:00:00-05:00", DateZone::Utc),
+            "Mar 5, 2026"
+        );
+        assert_eq!(format_date("yesterday", DateZone::Local), "—");
     }
 
     #[test]

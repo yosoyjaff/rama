@@ -320,6 +320,31 @@ pub struct History {
     pub pull: Pull,
     /// Merge with a merge commit even when a fast-forward would do.
     pub merge_commit: bool,
+    /// The clock commit dates are read on.
+    pub dates: DateZone,
+}
+
+/// The clock commit dates are shown on.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DateZone {
+    /// This computer's time zone.
+    #[default]
+    Local,
+    Utc,
+}
+
+impl DateZone {
+    /// `date` on this clock, written with chrono's `pattern`.
+    pub fn format(self, date: chrono::DateTime<chrono::FixedOffset>, pattern: &str) -> String {
+        match self {
+            DateZone::Local => date
+                .with_timezone(&chrono::Local)
+                .format(pattern)
+                .to_string(),
+            DateZone::Utc => date.with_timezone(&chrono::Utc).format(pattern).to_string(),
+        }
+    }
 }
 
 impl Default for History {
@@ -332,6 +357,7 @@ impl Default for History {
             panel: Panel::default(),
             pull: Pull::default(),
             merge_commit: true,
+            dates: DateZone::default(),
         }
     }
 }
