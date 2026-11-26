@@ -60,6 +60,9 @@ const DROP_MARK: f32 = 2.0;
 /// How far a drop zone reaches past its plate's edge: to put the bar in the
 /// middle of the gap between two plates.
 const MARK_OUTSET: f32 = (GAP + DROP_MARK) / 2.0;
+/// The room the strip leaves before its first plate across the band, for
+/// that plate's drop bar.
+pub const DROP_ROOM: f32 = MARK_OUTSET;
 /// How much faster a group plate's tab title shrinks than its name.
 const GROUP_TITLE_SHRINK: f32 = 8.0;
 /// A column's section label, and the space above one after the first.
@@ -333,6 +336,9 @@ pub fn tab_strip(
                 .flex_row()
                 .items_center()
                 .min_w_0()
+                // Room for the drop bar before the first plate, which sits
+                // in a gap's width out from it and would be clipped.
+                .pl(px(DROP_ROOM))
                 .overflow_x_scroll()
                 // Out to the band's end while a tab is dragged, for the
                 // end of the strip to take it.

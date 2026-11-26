@@ -99,7 +99,10 @@ impl Shell {
             .when_some(strip, |band, strip| {
                 band.child(
                     div()
-                        .mx(px(4.))
+                        .ml(px(4.))
+                        // The strip opens with room for a drop bar; this side
+                        // gives it back, so the first tab stays where it was.
+                        .mr(px(4. - crate::ui::tab_strip::DROP_ROOM))
                         .w(px(1.))
                         .h(px(18.))
                         .flex_none()
