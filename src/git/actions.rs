@@ -275,9 +275,7 @@ fn finish(output: std::process::Output, args: &[&str]) -> Result<String> {
 }
 
 fn git_env(root: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
-    let output = command(root, args, env)
-        .output()
-        .context("could not start git")?;
+    let output = super::command::output(&mut command(root, args, env), args)?;
     finish(output, args)
 }
 
@@ -289,8 +287,7 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Result<String> {
 /// git's output whether it succeeded or not, for the commands that answer
 /// with a failing exit code (`merge-tree` reporting conflicts).
 pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> String {
-    command(root, args, &[])
-        .output()
+    super::command::output(&mut command(root, args, &[]), args)
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .unwrap_or_default()
 }
