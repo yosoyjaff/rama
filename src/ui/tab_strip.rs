@@ -188,9 +188,8 @@ pub enum DropAt {
     /// Beside the tab at this position — after it when `after`, before it
     /// otherwise — in its group.
     Beside { tab: usize, after: bool },
-    /// Just before the group at this position, outside it: the near half of
-    /// its plate or heading, which is the only way between two groups that
-    /// touch.
+    /// Just before the group at this position, outside it: the left half of
+    /// its plate across the band, the way between two groups that touch.
     Before(usize),
 }
 pub type MenuHandler = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App)>;
@@ -309,9 +308,7 @@ pub fn tab_strip(
     for (index, item) in items.into_iter().enumerate() {
         strip = strip.child(match item {
             StripItem::Tab(tab) => plate(index, tab, column, dragging, events.clone()),
-            StripItem::Group(label) if column => {
-                group_heading(index, label, dragging, events.clone())
-            }
+            StripItem::Group(label) if column => group_heading(index, label, events.clone()),
             StripItem::Group(label) => group_plate(index, label, dragging, events.clone()),
             StripItem::Section(section) => section_label(index, section),
         });
@@ -371,12 +368,7 @@ impl RenderOnce for SectionText {
 /// A group down a column: a chevron and its name. Folded, the chevron gives
 /// way to the group's colour until the pointer comes over it; an options
 /// button shows on hover.
-fn group_heading(
-    index: usize,
-    label: GroupLabel,
-    dragging: bool,
-    events: StripEvents,
-) -> AnyElement {
+fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyElement {
     let StripEvents {
         select,
         rename,
@@ -465,11 +457,8 @@ fn group_heading(
             cx.stop_propagation();
             menu(index, event.position, window, cx);
         })
-        // A tab dragged here joins the group; over the top half it goes
-        // just before it instead.
-        .when(dragging, |heading| {
-            heading.child(before_group(index, true, drop.clone()))
-        })
+        // A tab dragged here joins the group. (Down a column the groups
+        // have a section of their own: there is no between.)
         .drag_over::<TabDrag>(|style, _, _, _| style.bg(wash(DROP_WASH)))
         .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::On(index), window, cx))
         .on_click(move |event, window, cx| {
@@ -541,7 +530,7 @@ fn group_plate(index: usize, label: GroupLabel, dragging: bool, events: StripEve
         // A tab dragged here joins the group; over the left half it goes
         // just before it instead.
         .when(dragging, |plate| {
-            plate.child(before_group(index, false, drop.clone()))
+            plate.child(before_group(index, drop.clone()))
         })
         .drag_over::<TabDrag>(|style, _, _, _| style.bg(wash(DROP_WASH)))
         .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::On(index), window, cx))
@@ -624,25 +613,23 @@ impl RenderOnce for TruncatedLabel {
     }
 }
 
-/// The near half of the group at strip position `index` while a tab is
-/// dragged — the top of a heading down a `column`, the left of a plate
-/// across the band: dropped there, the tab goes just before the group. It
-/// blocks the group under it, so only one of the two lights; the wheel
-/// still reaches the strip.
-fn before_group(index: usize, column: bool, drop: DropHandler) -> impl IntoElement {
-    let zone = div().absolute().top_0().left_0();
-    let zone = match column {
-        true => zone.right_0().h(gpui_kit::relative(0.5)),
-        false => zone.bottom_0().w(gpui_kit::relative(0.5)),
-    };
-    zone.id(("tab-group-before", index))
+/// The left half of the group plate at strip position `index` while a tab
+/// is dragged: dropped there, the tab goes just before the group, outside
+/// it — the way between two groups that touch. It blocks the plate under it,
+/// so only one of the two lights; the wheel still reaches the strip.
+fn before_group(index: usize, drop: DropHandler) -> impl IntoElement {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left_0()
+        .w(gpui_kit::relative(0.5))
+        .id(("tab-group-before", index))
         .block_mouse_except_scroll()
-        .drag_over::<TabDrag>(move |style, _, _, cx| {
-            let accent = Theme::of(cx).accent;
-            match column {
-                true => style.border_t(px(DROP_MARK)).border_color(accent),
-                false => style.border_l(px(DROP_MARK)).border_color(accent),
-            }
+        .drag_over::<TabDrag>(|style, _, _, cx| {
+            style
+                .border_l(px(DROP_MARK))
+                .border_color(Theme::of(cx).accent)
         })
         .on_drop(move |drag: &TabDrag, window, cx| drop(drag, DropAt::Before(index), window, cx))
 }
