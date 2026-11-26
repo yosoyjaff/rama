@@ -657,8 +657,33 @@ impl Workspace {
 
     /// What the strip shows, in order. Down a column: the groups, each a
     /// heading over its tabs unless folded, then the tabs in none. Across
-    /// the band: a plate per group, then the tabs in none.
+    /// the band: the tabs in their order, a group's as one plate where they
+    /// stand, so a tab can sit between two groups; a group with no tabs
+    /// stands nowhere in that order, and comes last.
     fn strip_entries(&self, column: bool) -> Vec<Target> {
+        if !column {
+            let mut entries = Vec::new();
+            let mut placed: Vec<u64> = Vec::new();
+            for index in 0..self.tabs.len() {
+                match self.tabs[index] {
+                    Surface::Repo { group: None, .. } => entries.push(Target::Tab(index)),
+                    Surface::Repo {
+                        group: Some(id), ..
+                    } if !placed.contains(&id) && self.group(id).is_some() => {
+                        placed.push(id);
+                        entries.push(Target::Group(id));
+                    }
+                    _ => {}
+                }
+            }
+            entries.extend(
+                self.groups
+                    .iter()
+                    .filter(|group| !placed.contains(&group.id))
+                    .map(|group| Target::Group(group.id)),
+            );
+            return entries;
+        }
         let loose = (0..self.tabs.len())
             .filter(|&index| matches!(self.tabs[index], Surface::Repo { group: None, .. }));
         let mut entries = Vec::new();
@@ -2029,6 +2054,17 @@ mod tests {
                     ]
                 );
                 // Across the band the group is one plate.
+                assert_eq!(
+                    workspace.strip_entries(false),
+                    vec![Target::Group(id), Target::Tab(3)]
+                );
+                // Where its tabs stand: a tab before them comes before it.
+                workspace.drop_tab(3, Dropped::BeforeGroup(id), cx);
+                assert_eq!(
+                    workspace.strip_entries(false),
+                    vec![Target::Tab(1), Target::Group(id)]
+                );
+                workspace.drop_tab(1, Dropped::Strip, cx);
                 assert_eq!(
                     workspace.strip_entries(false),
                     vec![Target::Group(id), Target::Tab(3)]
