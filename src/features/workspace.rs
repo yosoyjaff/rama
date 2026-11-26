@@ -113,6 +113,11 @@ pub struct Workspace {
 enum Dropped {
     Strip,
     On(Target),
+    /// Beside tab `tab`, after it when `after`.
+    Beside {
+        tab: usize,
+        after: bool,
+    },
     BeforeGroup(u64),
 }
 
@@ -986,9 +991,8 @@ impl Workspace {
         }));
     }
 
-    /// Project tab `index` dropped `at` a place. On a tab it takes that
-    /// tab's place — after it when it came from the left, before it from
-    /// the right — and its group, or none. On a group it joins the end of
+    /// Project tab `index` dropped `at` a place. Beside a tab it lands on
+    /// that side of it, in its group or none. On a group it joins the end of
     /// it; just before one it goes there, in no group. On the strip itself
     /// it goes last, in no group.
     fn drop_tab(&mut self, index: usize, at: Dropped, cx: &mut Context<Self>) {
@@ -1003,8 +1007,13 @@ impl Workspace {
                 self.move_to_group(index, id, cx);
                 return;
             }
-            // Home stays first.
-            Dropped::On(Target::Tab(other)) => (other.max(1), self.group_of(other)),
+            Dropped::Beside { tab, after } => {
+                // The gap it goes into, Home staying first; the tabs after
+                // this one move up a place once it is out of the way.
+                let gap = if after { tab + 1 } else { tab.max(1) };
+                let to = if index < gap { gap - 1 } else { gap };
+                (to, self.group_of(tab))
+            }
             // Its first tab moves up a place once this one is out of the
             // way in front of it. An empty group stands nowhere: last.
             Dropped::BeforeGroup(id) => match self.group_span(id) {
@@ -1012,7 +1021,7 @@ impl Workspace {
                 Some((first, _)) => (first, None),
                 None => (last, None),
             },
-            Dropped::On(Target::Section(_)) | Dropped::Strip => (last, None),
+            Dropped::On(Target::Tab(_) | Target::Section(_)) | Dropped::Strip => (last, None),
         };
         self.move_tab(index, to);
         self.set_group_of(to, into);
@@ -1182,6 +1191,10 @@ impl Workspace {
                     DropAt::On(position) => match target(position) {
                         Some(target) => Dropped::On(target),
                         None => return,
+                    },
+                    DropAt::Beside { tab, after } => match target(tab) {
+                        Some(Target::Tab(tab)) => Dropped::Beside { tab, after },
+                        _ => return,
                     },
                     DropAt::Before(position) => match target(position) {
                         Some(Target::Group(id)) => Dropped::BeforeGroup(id),
@@ -1948,19 +1961,40 @@ mod tests {
                 assert_eq!(titles(workspace), vec!["Home", "three", "two", "one"]);
                 assert_eq!(groups_of(workspace), vec![None, Some(id), None, None]);
 
-                // A tab: its place, from the right before it, and its group.
-                workspace.drop_tab(3, Dropped::On(Target::Tab(1)), cx);
+                // Before a tab: there, in its group.
+                workspace.drop_tab(
+                    3,
+                    Dropped::Beside {
+                        tab: 1,
+                        after: false,
+                    },
+                    cx,
+                );
                 assert_eq!(titles(workspace), vec!["Home", "one", "three", "two"]);
                 assert_eq!(groups_of(workspace), vec![None, Some(id), Some(id), None]);
 
-                // From the left, after it; a loose tab takes it out of its group.
-                workspace.drop_tab(1, Dropped::On(Target::Tab(3)), cx);
+                // After a loose tab: there, out of its group.
+                workspace.drop_tab(
+                    1,
+                    Dropped::Beside {
+                        tab: 3,
+                        after: true,
+                    },
+                    cx,
+                );
                 assert_eq!(titles(workspace), vec!["Home", "three", "two", "one"]);
                 assert_eq!(groups_of(workspace), vec![None, Some(id), None, None]);
 
                 workspace.drop_tab(0, Dropped::On(Target::Group(id)), cx);
                 assert_eq!(workspace.group_of(0), None, "home stays out of groups");
-                workspace.drop_tab(2, Dropped::On(Target::Tab(0)), cx);
+                workspace.drop_tab(
+                    2,
+                    Dropped::Beside {
+                        tab: 0,
+                        after: false,
+                    },
+                    cx,
+                );
                 assert_eq!(titles(workspace)[0], "Home", "home stays first");
             })
             .expect("window update");
