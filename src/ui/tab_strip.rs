@@ -458,6 +458,43 @@ impl RenderOnce for HeadingName {
     }
 }
 
+/// One line of text that takes the rest of a row, cut with an ellipsis when
+/// it does not fit and then shown in full in a tooltip. `id` comes from the
+/// row's own: it keys what last frame measured.
+#[derive(IntoElement)]
+pub struct TruncatedLabel {
+    id: ElementId,
+    text: SharedString,
+}
+
+impl TruncatedLabel {
+    pub fn new(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            text: text.into(),
+        }
+    }
+}
+
+impl RenderOnce for TruncatedLabel {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let id = Arc::new(self.id);
+        let overflows = overflow_state(&id, window, cx);
+        let tip = overflows
+            .read(cx)
+            .then(|| crate::ui::tip::tip(self.text.clone()));
+        div()
+            .id(ElementId::NamedChild(id, "label".into()))
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .when_some(tip, |label, tip| label.tooltip(tip))
+            .child(self.text.clone())
+            .child(overflow_probe(self.text, overflows))
+    }
+}
+
 /// A group heading's chevron. Folded, it hides until the pointer comes
 /// over the heading, where the group's colour stands for it.
 #[derive(IntoElement)]
