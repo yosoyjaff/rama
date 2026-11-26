@@ -112,11 +112,6 @@ fn init(cx: &mut App) {
     keymap::init(cx);
     crate::ui::theme::init(cx);
     crate::settings::init(cx);
-    // The git layer does not read the settings: its time limit is handed
-    // down, now and whenever it changes.
-    crate::settings::watch(cx, |settings| {
-        crate::git::command::set_timeout(settings.history.timeout.limit())
-    });
     crate::recents::init(cx);
     // The window opens in the appearance the user last chose, not in the
     // library's default and then a flash into theirs.
