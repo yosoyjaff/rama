@@ -19,7 +19,7 @@ use super::search::history_search_ranges;
 use super::transition::HistoryRowTransition;
 use super::{HistoryEvent, HistoryView, actions, branch_column};
 use crate::git::Commit;
-use crate::settings::{self, Authors, ColumnId, DateZone};
+use crate::settings::{Authors, ColumnId};
 use crate::ui::icons;
 use crate::ui::motion::{self, AnimationExt as _};
 use crate::ui::text_input::TextInput;
@@ -114,13 +114,13 @@ fn author_cell(
     cell.justify_start().child(chip).into_any_element()
 }
 
-fn date_cell(width: f32, when: &str, zone: DateZone, opacity: f32, theme: &Theme) -> AnyElement {
+fn date_cell(width: f32, when: &str, opacity: f32, theme: &Theme) -> AnyElement {
     column_cell(width, ColumnId::Date.limits().0, opacity)
         .pr(px(8.0))
         .truncate()
         .text_size(px(10.5))
         .text_color(theme.text_muted)
-        .child(SharedString::from(format_date(when, zone)))
+        .child(SharedString::from(format_date(when)))
         .into_any_element()
 }
 
@@ -482,7 +482,6 @@ impl HistoryView {
             self.render_refs_cell(&sha, badges, node_x, color, theme, cx)
         });
         let layout = ColumnLayout::of(cx);
-        let zone = settings::read(cx, |settings| settings.history.dates);
         let columns: Vec<AnyElement> = layout
             .visible()
             .into_iter()
@@ -492,7 +491,7 @@ impl HistoryView {
                     ColumnId::Author => {
                         author_cell(&sha, width, layout.authors, &commit, strength, theme)
                     }
-                    ColumnId::Date => date_cell(width, &commit.author.when, zone, strength, theme),
+                    ColumnId::Date => date_cell(width, &commit.author.when, strength, theme),
                     ColumnId::Sha => self.sha_cell(&sha, width, strength, theme, cx),
                 }
             })
