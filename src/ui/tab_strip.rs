@@ -21,9 +21,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::{
-    AnyElement, App, ContentMask, ElementId, Entity, FontWeight, Hsla, IntoElement, MouseButton,
-    Pixels, Point, ShapedLine, SharedString, TextAlign, TextRun, Window, canvas, div, prelude::*,
-    px,
+    AnyElement, App, AppContext as _, ContentMask, ElementId, Entity, FontWeight, Hsla,
+    IntoElement, MouseButton, Pixels, Point, ShapedLine, SharedString, TextAlign, TextRun, Window,
+    canvas, div, prelude::*, px,
 };
 
 use crate::ui::motion;
@@ -173,8 +173,9 @@ pub enum StripItem {
 }
 
 pub type Handler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
-/// A plate dropped on another: the dragged one's position, then the target's.
-pub type DropHandler = Rc<dyn Fn(usize, usize, &mut Window, &mut App)>;
+/// A tab dropped: what was dragged, and the position of the plate it landed
+/// on, or `None` for the strip around the plates.
+pub type DropHandler = Rc<dyn Fn(&TabDrag, Option<usize>, &mut Window, &mut App)>;
 pub type MenuHandler = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App)>;
 
 /// What the strip reports, each with the item's position in the strip. A
@@ -188,20 +189,42 @@ pub struct StripEvents {
     /// A right click, or a group's options button, with where it landed in
     /// the window.
     pub menu: MenuHandler,
-    /// A tab dragged onto a group.
+    /// A tab dropped on a plate or on the strip.
     pub drop: DropHandler,
 }
 
-/// What a tab carries while it is dragged: where it sits in the strip, and
-/// what the chip under the pointer shows.
+/// What a tab carries while it is dragged: where it came from, and what the
+/// chip under the pointer shows.
 pub struct TabDrag {
-    position: usize,
+    pub from: DragFrom,
     title: SharedString,
     icon: Option<&'static str>,
 }
 
+/// Where a dragged tab came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragFrom {
+    /// A plate, by its position in the strip.
+    Strip(usize),
+    /// Somewhere the owner drew it — a dropdown row — by the owner's own
+    /// number for it.
+    Owner(usize),
+}
+
+impl TabDrag {
+    pub fn new(from: DragFrom, title: SharedString, icon: Option<&'static str>) -> Self {
+        Self { from, title, icon }
+    }
+
+    /// The chip that follows the pointer: what `on_drag` builds.
+    pub fn chip(&self, cx: &mut App) -> Entity<TabDragChip> {
+        let (title, icon) = (self.title.clone(), self.icon);
+        cx.new(|_| TabDragChip { title, icon })
+    }
+}
+
 /// Drawn under the pointer while a tab is dragged: its glyph and title.
-struct TabDragChip {
+pub struct TabDragChip {
     title: SharedString,
     icon: Option<&'static str>,
 }
@@ -258,6 +281,9 @@ pub fn tab_strip(
                 .overflow_x_scroll(),
         })
         .track_scroll(scroll);
+    // Around the plates, a dropped tab leaves its group.
+    let drop = events.drop.clone();
+    strip = strip.on_drop(move |drag: &TabDrag, window, cx| drop(drag, None, window, cx));
     for (index, item) in items.into_iter().enumerate() {
         strip = strip.child(match item {
             StripItem::Tab(tab) => plate(index, tab, column, events.clone()),
@@ -398,7 +424,7 @@ fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyEle
         })
         // A tab dragged here joins the group.
         .drag_over::<TabDrag>(|style, _, _, _| style.bg(wash(DROP_WASH)))
-        .on_drop(move |drag: &TabDrag, window, cx| drop(drag.position, index, window, cx))
+        .on_drop(move |drag: &TabDrag, window, cx| drop(drag, Some(index), window, cx))
         .on_click(move |event, window, cx| {
             cx.stop_propagation();
             // Each click of a double one folds or opens the group: the second
@@ -466,7 +492,7 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
         })
         // A tab dragged here joins the group.
         .drag_over::<TabDrag>(|style, _, _, _| style.bg(wash(DROP_WASH)))
-        .on_drop(move |drag: &TabDrag, window, cx| drop(drag.position, index, window, cx))
+        .on_drop(move |drag: &TabDrag, window, cx| drop(drag, Some(index), window, cx))
         .on_click(move |event, window, cx| {
             cx.stop_propagation();
             // The first click of a double one opened the dropdown; the second
@@ -679,15 +705,12 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
         rename: on_rename,
         close: on_close,
         menu: on_menu,
-        drop: _,
+        drop: on_drop,
     } = events;
     // A project tab can be dragged onto a group; Home cannot, nor a tab
     // whose name is being edited.
-    let drag = (tab.closable && tab.editor.is_none()).then(|| TabDrag {
-        position: index,
-        title: tab.title.clone(),
-        icon: tab.icon,
-    });
+    let drag = (tab.closable && tab.editor.is_none())
+        .then(|| TabDrag::new(DragFrom::Strip(index), tab.title.clone(), tab.icon));
     let group = tab.group.clone();
     let fade = tab.group.clone();
     let closable = tab.closable;
@@ -754,10 +777,12 @@ fn plate(index: usize, tab: Tab, column: bool, events: StripEvents) -> AnyElemen
         .when_some(drag, |plate, drag| {
             plate.on_drag(drag, |drag, _, _, cx| {
                 cx.stop_propagation();
-                let (title, icon) = (drag.title.clone(), drag.icon);
-                cx.new(|_| TabDragChip { title, icon })
+                drag.chip(cx)
             })
         })
+        // A tab dropped here goes where this one is: into its group, or out
+        // of any.
+        .on_drop(move |drag: &TabDrag, window, cx| on_drop(drag, Some(index), window, cx))
         .children(tab.icon.map(|path| TabGlyph { path }))
         .child(
             div()
