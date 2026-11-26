@@ -22,9 +22,7 @@ impl TestRepo {
         let dir = tempfile::tempdir().expect("temporary directory");
         let repo = Self { dir };
         repo.git(&["init", "--initial-branch=main"]);
-        repo.git(&["config", "user.name", "Test"]);
-        repo.git(&["config", "user.email", "test@example.com"]);
-        repo.git(&["config", "commit.gpgsign", "false"]);
+        repo.configure();
         repo
     }
 
@@ -36,10 +34,20 @@ impl TestRepo {
     /// with the same deterministic identity as [`Self::new`].
     pub fn from(dir: TempDir) -> Self {
         let repo = Self { dir };
-        repo.git(&["config", "user.name", "Test"]);
-        repo.git(&["config", "user.email", "test@example.com"]);
-        repo.git(&["config", "commit.gpgsign", "false"]);
+        repo.configure();
         repo
+    }
+
+    /// The repository's own settings, which outrank the user's and the
+    /// system's — including for the git the code under test runs, which does
+    /// not get this file's environment.
+    fn configure(&self) {
+        self.git(&["config", "user.name", "Test"]);
+        self.git(&["config", "user.email", "test@example.com"]);
+        self.git(&["config", "commit.gpgsign", "false"]);
+        // Git for Windows installs with `core.autocrlf=true`: a checkout
+        // would write `\r\n` into files the tests wrote with `\n`.
+        self.git(&["config", "core.autocrlf", "false"]);
     }
 
     /// Run a git command that is expected to succeed, returning its stdout.
