@@ -22,7 +22,8 @@ use std::sync::Arc;
 
 use gpui_kit::{
     AnyElement, App, ContentMask, ElementId, Entity, FontWeight, Hsla, IntoElement, MouseButton,
-    Pixels, Point, SharedString, TextAlign, TextRun, Window, canvas, div, prelude::*, px,
+    Pixels, Point, ShapedLine, SharedString, TextAlign, TextRun, Window, canvas, div, prelude::*,
+    px,
 };
 
 use crate::ui::motion;
@@ -52,6 +53,8 @@ const CLOSE_ROOM: f32 = 26.0;
 const FADE: f32 = 40.0;
 /// Between a group plate's dot, name and chevron.
 const GROUP_GAP: f32 = 6.0;
+/// How much faster a group plate's tab title shrinks than its name.
+const GROUP_TITLE_SHRINK: f32 = 8.0;
 /// A column's section label, and the space above one after the first.
 pub const SECTION_HEIGHT: f32 = 28.0;
 const SECTION_GAP: f32 = 8.0;
@@ -288,13 +291,13 @@ fn group_heading(index: usize, label: GroupLabel, events: StripEvents) -> AnyEle
         })
         .child(chevron);
     let name = match label.editor {
-        Some(editor) => div().flex_1().min_w_0().child(editor),
-        None => div()
-            .flex_1()
-            .min_w_0()
-            .truncate()
-            .group_hover(key.clone(), |style| style.pr(px(CLOSE_ROOM)))
-            .child(label.name),
+        Some(editor) => div().flex_1().min_w_0().child(editor).into_any_element(),
+        None => HeadingName {
+            id: label.id.clone(),
+            name: label.name,
+            key: key.clone(),
+        }
+        .into_any_element(),
     };
     div()
         .id(label.id)
@@ -359,7 +362,7 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
     let key = SharedString::from(format!("tab-group-plate-{index}"));
     let lit = label.active;
     div()
-        .id(label.id)
+        .id(label.id.clone())
         .group(key.clone())
         .h(px(PLATE_HEIGHT))
         .flex_none()
@@ -387,6 +390,7 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
                 .bg(label.color),
         )
         .child(GroupPlateText {
+            id: label.id.clone(),
             name: label.name,
             current: label.current,
             editor: label.editor,
@@ -402,6 +406,35 @@ fn group_plate(index: usize, label: GroupLabel, events: StripEvents) -> AnyEleme
             select(index, window, cx);
         })
         .into_any_element()
+}
+
+/// A group heading's name, cut with an ellipsis when it is too long and
+/// then shown in full in a tooltip.
+#[derive(IntoElement)]
+struct HeadingName {
+    id: ElementId,
+    name: SharedString,
+    key: SharedString,
+}
+
+impl RenderOnce for HeadingName {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let id = Arc::new(self.id);
+        let overflows = overflow_state(&id, window, cx);
+        let tip = overflows
+            .read(cx)
+            .then(|| crate::ui::tip::tip(self.name.clone()));
+        div()
+            .id(ElementId::NamedChild(id, "name".into()))
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .group_hover(self.key, |style| style.pr(px(CLOSE_ROOM)))
+            .when_some(tip, |name, tip| name.tooltip(tip))
+            .child(self.name.clone())
+            .child(overflow_probe(self.name, overflows))
+    }
 }
 
 /// A group heading's chevron. Folded, it hides until the pointer comes
@@ -450,8 +483,11 @@ impl RenderOnce for OptionsDot {
     }
 }
 
+/// A group plate's name and the title of its tab on screen. The title gives
+/// way first; whichever is cut, a tooltip shows both in full.
 #[derive(IntoElement)]
 struct GroupPlateText {
+    id: ElementId,
     name: SharedString,
     current: Option<SharedString>,
     editor: Option<AnyElement>,
@@ -460,13 +496,36 @@ struct GroupPlateText {
 }
 
 impl RenderOnce for GroupPlateText {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = Theme::of(cx);
-        let (rest, lit) = (theme.text_muted, theme.text);
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         if let Some(editor) = self.editor {
             return div().w(px(120.0)).child(editor).into_any_element();
         }
+        let id = Arc::new(self.id);
+        let name_overflows = overflow_state(
+            &Arc::new(ElementId::NamedChild(id.clone(), "name".into())),
+            window,
+            cx,
+        );
+        let current_overflows = overflow_state(
+            &Arc::new(ElementId::NamedChild(id.clone(), "current".into())),
+            window,
+            cx,
+        );
+        let cut = *name_overflows.read(cx) || *current_overflows.read(cx);
+        let tip = cut.then(|| {
+            let text = match &self.current {
+                Some(current) if !self.name.trim().is_empty() => {
+                    format!("{}\n{current}", self.name)
+                }
+                Some(current) => current.to_string(),
+                None => self.name.to_string(),
+            };
+            crate::ui::tip::tip(text)
+        });
+        let theme = Theme::of(cx);
+        let (rest, lit) = (theme.text_muted, theme.text);
         div()
+            .id(ElementId::NamedChild(id, "text".into()))
             .min_w_0()
             .flex()
             .flex_row()
@@ -474,16 +533,27 @@ impl RenderOnce for GroupPlateText {
             .gap(px(GROUP_GAP))
             .text_color(if self.lit { lit } else { rest })
             .group_hover(self.key, move |style| style.text_color(lit))
+            .when_some(tip, |text, tip| text.tooltip(tip))
             .child(
                 div()
-                    .flex_none()
+                    .relative()
+                    .min_w_0()
+                    .truncate()
                     .font_weight(FontWeight::MEDIUM)
-                    .child(self.name),
+                    .child(self.name.clone())
+                    .child(overflow_probe(self.name, name_overflows)),
             )
-            .children(
-                self.current
-                    .map(|current| div().min_w_0().truncate().text_color(rest).child(current)),
-            )
+            .children(self.current.map(|current| {
+                div()
+                    .relative()
+                    .min_w_0()
+                    // The title gives way well before the name does.
+                    .flex_shrink(GROUP_TITLE_SHRINK)
+                    .truncate()
+                    .text_color(rest)
+                    .child(current.clone())
+                    .child(overflow_probe(current, current_overflows))
+            }))
             .child(
                 crate::ui::icons::icon(crate::ui::icons::ALT_ARROW_DOWN)
                     .flex_none()
@@ -641,11 +711,7 @@ struct TabTitle {
 impl RenderOnce for TabTitle {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let key = Arc::new(self.id);
-        let overflows = window.use_keyed_state(
-            ElementId::NamedChild(key.clone(), "title-overflows".into()),
-            cx,
-            |_, _| false,
-        );
+        let overflows = overflow_state(&key, window, cx);
         let theme = Theme::of(cx);
         let lit = theme.text;
         let tip = overflows
@@ -661,38 +727,72 @@ impl RenderOnce for TabTitle {
     }
 }
 
+/// Whether `id`'s text overflowed its box last frame, as [`overflow_probe`]
+/// or [`faded_label`] measured it.
+fn overflow_state(id: &Arc<ElementId>, window: &mut Window, cx: &mut App) -> Entity<bool> {
+    window.use_keyed_state(
+        ElementId::NamedChild(id.clone(), "overflows".into()),
+        cx,
+        |_, _| false,
+    )
+}
+
+/// `text` shaped as one line in the inherited style, and the run it used.
+fn shape(text: &SharedString, window: &mut Window) -> (ShapedLine, TextRun, Pixels) {
+    let style = window.text_style();
+    let font_size = style.font_size.to_pixels(window.rem_size());
+    let run = TextRun {
+        len: text.len(),
+        font: style.font(),
+        color: style.color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line =
+        window
+            .text_system()
+            .shape_line(text.clone(), font_size, std::slice::from_ref(&run), None);
+    (line, run, font_size)
+}
+
+/// Tell `overflows` whether a line `width` wide fits a box `room` wide.
+/// Measured after layout, so the tooltip it decides comes a frame later.
+fn record_overflow(overflows: &Entity<bool>, width: Pixels, room: Pixels, cx: &mut App) {
+    // Half a pixel of slack: a box sized to its text can come out a hair
+    // narrower than the text measured again.
+    let fits = room <= px(0.0) || width <= room + px(0.5);
+    overflows.update(cx, |overflows, cx| {
+        if *overflows == fits {
+            *overflows = !fits;
+            cx.notify();
+        }
+    });
+}
+
+/// Measures `text` against the box it is laid over — a child of the element
+/// that truncates it — and records whether it was cut.
+fn overflow_probe(text: SharedString, overflows: Entity<bool>) -> impl IntoElement {
+    canvas(
+        move |bounds, window, cx| {
+            let (line, _, _) = shape(&text, window);
+            record_overflow(&overflows, line.width(), bounds.size.width, cx);
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .inset_0()
+}
+
 /// One line of text in the inherited style. Short text is left as is; text
 /// wider than the box fades to nothing over its last [`FADE`] pixels.
 /// `overflows` learns which of the two it was, for the next frame.
 fn faded_label(text: SharedString, overflows: Entity<bool>) -> impl IntoElement {
     canvas(
         move |bounds, window, cx| {
-            let style = window.text_style();
-            let font_size = style.font_size.to_pixels(window.rem_size());
-            let run = TextRun {
-                len: text.len(),
-                font: style.font(),
-                color: style.color,
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-            let line = window.text_system().shape_line(
-                text.clone(),
-                font_size,
-                std::slice::from_ref(&run),
-                None,
-            );
-            let fits = line.width() <= bounds.size.width || bounds.size.width <= px(0.0);
-            // Measured here, after layout: the next frame adds or drops the
-            // tooltip.
-            overflows.update(cx, |overflows, cx| {
-                if *overflows == fits {
-                    *overflows = !fits;
-                    cx.notify();
-                }
-            });
-            if fits {
+            let (line, run, font_size) = shape(&text, window);
+            record_overflow(&overflows, line.width(), bounds.size.width, cx);
+            if line.width() <= bounds.size.width || bounds.size.width <= px(0.0) {
                 return line;
             }
             // One run per character, each dimmed by how close its centre
