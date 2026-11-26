@@ -978,25 +978,29 @@ impl Workspace {
         }));
     }
 
-    /// Tab `index` dropped on `onto`: a group, or a tab, takes it into its
-    /// group, or out of any for a tab in none; the strip itself (`None`)
-    /// takes it out of its group.
+    /// Project tab `index` dropped on `onto`. On a tab it takes that tab's
+    /// place — after it when it came from the left, before it from the
+    /// right — and its group, or none. On a group it joins the end of it.
+    /// On the strip itself (`None`) it goes last, in no group.
     fn drop_tab(&mut self, index: usize, onto: Option<Target>, cx: &mut Context<Self>) {
-        if index == 0 || index >= self.tabs.len() {
+        if !matches!(self.tabs.get(index), Some(Surface::Repo { .. })) {
             return;
         }
-        let into = match onto {
-            Some(Target::Group(id)) => Some(id),
-            Some(Target::Tab(other)) => self.group_of(other),
-            Some(Target::Section(_)) | None => None,
-        };
         // Dropped from a dropdown, which has served its purpose.
         self.close_menu(cx);
-        match into {
-            Some(id) => self.move_to_group(index, id, cx),
-            None if self.group_of(index).is_some() => self.remove_from_group(index, cx),
-            None => {}
-        }
+        let (to, into) = match onto {
+            Some(Target::Group(id)) => {
+                self.move_to_group(index, id, cx);
+                return;
+            }
+            // Home stays first.
+            Some(Target::Tab(other)) => (other.max(1), self.group_of(other)),
+            Some(Target::Section(_)) | None => (self.project_tabs().last().unwrap_or(index), None),
+        };
+        self.move_tab(index, to);
+        self.set_group_of(to, into);
+        self.persist_tabs(cx);
+        cx.notify();
     }
 
     /// Open or fold Move to's groups, while the menu is open.
@@ -1881,14 +1885,27 @@ mod tests {
                 workspace.drop_tab(3, Some(Target::Group(id)), cx);
                 assert_eq!(groups_of(workspace), vec![None, Some(id), Some(id), None]);
 
+                assert_eq!(titles(workspace), vec!["Home", "one", "three", "two"]);
+
+                // The strip: last, in no group.
                 workspace.drop_tab(1, None, cx);
+                assert_eq!(titles(workspace), vec!["Home", "three", "two", "one"]);
                 assert_eq!(groups_of(workspace), vec![None, Some(id), None, None]);
 
+                // A tab: its place, from the right before it, and its group.
                 workspace.drop_tab(3, Some(Target::Tab(1)), cx);
+                assert_eq!(titles(workspace), vec!["Home", "one", "three", "two"]);
                 assert_eq!(groups_of(workspace), vec![None, Some(id), Some(id), None]);
+
+                // From the left, after it; a loose tab takes it out of its group.
+                workspace.drop_tab(1, Some(Target::Tab(3)), cx);
+                assert_eq!(titles(workspace), vec!["Home", "three", "two", "one"]);
+                assert_eq!(groups_of(workspace), vec![None, Some(id), None, None]);
 
                 workspace.drop_tab(0, Some(Target::Group(id)), cx);
                 assert_eq!(workspace.group_of(0), None, "home stays out of groups");
+                workspace.drop_tab(2, Some(Target::Tab(0)), cx);
+                assert_eq!(titles(workspace)[0], "Home", "home stays first");
             })
             .expect("window update");
     }
